@@ -1,0 +1,69 @@
+{
+  "app": {
+    "name": "Segno",
+    "tagline": "Estudia vídeos de piano"
+  },
+  "nav": {
+    "library": "Biblioteca",
+    "player": "Reproductor"
+  },
+  "library": {
+    "title": "Biblioteca",
+    "subtitle": "Tus vídeos, listos para estudiar.",
+    "emptyTitle": "Tu biblioteca está vacía",
+    "emptyBody": "Pronto podrás descargar vídeos de YouTube o importar los tuyos. Mientras tanto, explora los comandos con",
+    "error": "No se ha podido cargar la biblioteca.",
+    "status": {
+      "importing": "Importando",
+      "ready": "Listo",
+      "failed": "Error"
+    }
+  },
+  "player": {
+    "title": "Reproductor",
+    "empty": "Abre un vídeo de tu biblioteca para estudiarlo aquí."
+  },
+  "palette": {
+    "title": "Paleta de comandos",
+    "description": "Busca un comando para ejecutarlo",
+    "placeholder": "Escribe un comando…",
+    "empty": "No hay comandos con ese nombre.",
+    "open": "Buscar comandos"
+  },
+  "shortcuts": {
+    "title": "Atajos de teclado",
+    "description": "Todas las acciones se pueden ejecutar también desde la paleta de comandos.",
+    "none": "Sin atajo"
+  },
+  "commands": {
+    "openPalette": "Abrir la paleta de comandos",
+    "showShortcuts": "Ver los atajos de teclado",
+    "goToLibrary": "Ir a la biblioteca",
+    "goToPlayer": "Ir al reproductor",
+    "toggleLanguage": "Cambiar de idioma (español / inglés)"
+  },
+  "commandGroups": {
+    "general": "General",
+    "navigation": "Navegación",
+    "playback": "Reproducción",
+    "loops": "Bucles",
+    "markers": "Marcadores"
+  },
+  "keys": {
+    "space": "Espacio"
+  },
+  "status": {
+    "connecting": "Conectando con el núcleo…",
+    "connected": "Segno {{version}}",
+    "disconnected": "Sin conexión con el núcleo",
+    "library": "Biblioteca: {{path}}"
+  },
+  "language": {
+    "other": "English",
+    "label": "Idioma"
+  },
+  "common": {
+    "loading": "Cargando…",
+    "retry": "Reintentar"
+  }
+}

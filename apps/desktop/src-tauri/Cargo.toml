@@ -1,0 +1,30 @@
+[package]
+name = "segno-desktop"
+description = "Segno desktop app: hosts the UI and the embedded core API."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+# The library is what `main.rs` (and, one day, mobile targets) run.
+name = "segno_desktop_lib"
+crate-type = ["rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+anyhow.workspace = true
+segno-api.workspace = true
+segno-storage.workspace = true
+serde.workspace = true
+tauri = { version = "2", features = [] }
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true

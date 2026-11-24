@@ -1,0 +1,21 @@
+{
+  "name": "@segno/api-client",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Typed client for the Segno core API, generated from its OpenAPI document.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "generate": "cargo run --quiet -p segno-api -- openapi --out openapi.json && openapi-typescript openapi.json --output src/schema.d.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "openapi-fetch": "^0.17.0"
+  },
+  "devDependencies": {
+    "openapi-typescript": "^7.13.0",
+    "typescript": "^5.9.3"
+  }
+}

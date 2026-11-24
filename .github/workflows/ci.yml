@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Git hooks are for developers' machines, not for CI checkouts.
+  LEFTHOOK: 0
+
+jobs:
+  ui:
+    name: UI (TypeScript)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm --filter @segno/ui build
+
+  engine:
+    name: Engine (Python)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+      - run: uv sync --locked --directory engine
+      - run: uv run --directory engine ruff check . ../scripts
+      - run: uv run --directory engine ruff format --check . ../scripts
+      - run: uv run --directory engine pyright
+      - run: uv run --directory engine pytest
+
+  core:
+    name: Core and desktop (Rust)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install the toolchain pinned in rust-toolchain.toml
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build the UI (the desktop crate embeds it)
+        run: pnpm --filter @segno/ui build
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked
+      - name: The generated API client matches the Rust API
+        run: |
+          pnpm gen:api
+          git diff --exit-code -- packages/api-client
+
+  installer:
+    name: Windows installer
+    needs: [ui, engine, core]
+    if: github.event_name != 'pull_request'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: segno-windows-installer
+          path: target/release/bundle/nsis/*.exe
+          if-no-files-found: error

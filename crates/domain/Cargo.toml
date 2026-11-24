@@ -1,0 +1,18 @@
+[package]
+name = "segno-domain"
+description = "Segno domain model: entities, rules and ports implemented by adapters."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+chrono.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true

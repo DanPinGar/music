@@ -1,0 +1,69 @@
+{
+  "app": {
+    "name": "Segno",
+    "tagline": "Study piano videos"
+  },
+  "nav": {
+    "library": "Library",
+    "player": "Player"
+  },
+  "library": {
+    "title": "Library",
+    "subtitle": "Your videos, ready to study.",
+    "emptyTitle": "Your library is empty",
+    "emptyBody": "Soon you will be able to download videos from YouTube or import your own. Meanwhile, explore the commands with",
+    "error": "The library could not be loaded.",
+    "status": {
+      "importing": "Importing",
+      "ready": "Ready",
+      "failed": "Failed"
+    }
+  },
+  "player": {
+    "title": "Player",
+    "empty": "Open a video from your library to study it here."
+  },
+  "palette": {
+    "title": "Command palette",
+    "description": "Search for a command to run",
+    "placeholder": "Type a command…",
+    "empty": "No commands found.",
+    "open": "Search commands"
+  },
+  "shortcuts": {
+    "title": "Keyboard shortcuts",
+    "description": "Every action can also be run from the command palette.",
+    "none": "No shortcut"
+  },
+  "commands": {
+    "openPalette": "Open the command palette",
+    "showShortcuts": "Show keyboard shortcuts",
+    "goToLibrary": "Go to the library",
+    "goToPlayer": "Go to the player",
+    "toggleLanguage": "Switch language (Spanish / English)"
+  },
+  "commandGroups": {
+    "general": "General",
+    "navigation": "Navigation",
+    "playback": "Playback",
+    "loops": "Loops",
+    "markers": "Markers"
+  },
+  "keys": {
+    "space": "Space"
+  },
+  "status": {
+    "connecting": "Connecting to the core…",
+    "connected": "Segno {{version}}",
+    "disconnected": "No connection to the core",
+    "library": "Library: {{path}}"
+  },
+  "language": {
+    "other": "Español",
+    "label": "Language"
+  },
+  "common": {
+    "loading": "Loading…",
+    "retry": "Retry"
+  }
+}

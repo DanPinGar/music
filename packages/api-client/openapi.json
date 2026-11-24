@@ -1,0 +1,350 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Segno API",
+    "description": "Core API of Segno: library, navigation data, markers, comments and analysis jobs.",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Liveness probe. Needs no token.",
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "description": "The API is serving",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/system": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Version and storage details of the running core.",
+        "operationId": "get_system",
+        "responses": {
+          "200": {
+            "description": "Facts about the core",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemInfo"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "token": []
+          }
+        ]
+      }
+    },
+    "/videos": {
+      "get": {
+        "tags": [
+          "videos"
+        ],
+        "summary": "Lists the videos in the library, newest first.",
+        "operationId": "list_videos",
+        "responses": {
+          "200": {
+            "description": "Videos in the library",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/VideoDto"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "token": []
+          }
+        ]
+      }
+    },
+    "/videos/{id}": {
+      "get": {
+        "tags": [
+          "videos"
+        ],
+        "summary": "Gets one video.",
+        "operationId": "get_video",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Video id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The video",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such video",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "token": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Health": {
+        "type": "object",
+        "description": "Result of the liveness probe.",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "Always `ok` while the API is serving."
+          }
+        }
+      },
+      "Problem": {
+        "type": "object",
+        "description": "RFC 9457 problem details (`application/problem+json`).",
+        "required": [
+          "type",
+          "title",
+          "status"
+        ],
+        "properties": {
+          "detail": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Explanation specific to this occurrence."
+          },
+          "status": {
+            "type": "integer",
+            "format": "int32",
+            "description": "HTTP status code.",
+            "minimum": 0
+          },
+          "title": {
+            "type": "string",
+            "description": "Short summary of the problem type."
+          },
+          "type": {
+            "type": "string",
+            "description": "URI identifying the problem type; `about:blank` when the status code says it all."
+          }
+        }
+      },
+      "SystemInfo": {
+        "type": "object",
+        "description": "Facts about the running core, shown in the UI's status bar.",
+        "required": [
+          "version",
+          "schema_version"
+        ],
+        "properties": {
+          "library_path": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Folder holding the library database and media, when served locally."
+          },
+          "schema_version": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Latest database migration applied."
+          },
+          "version": {
+            "type": "string",
+            "description": "Version of the core."
+          }
+        }
+      },
+      "VideoDto": {
+        "type": "object",
+        "description": "A video in the library.",
+        "required": [
+          "id",
+          "source",
+          "title",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "channel": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "duration_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "fps": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "height": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "source": {
+            "$ref": "#/components/schemas/VideoSourceDto"
+          },
+          "source_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Original address, for downloaded videos."
+          },
+          "status": {
+            "$ref": "#/components/schemas/VideoStatusDto"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "width": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "VideoSourceDto": {
+        "type": "string",
+        "description": "Where a video came from.",
+        "enum": [
+          "youtube",
+          "file"
+        ]
+      },
+      "VideoStatusDto": {
+        "type": "string",
+        "description": "Lifecycle of a library entry.",
+        "enum": [
+          "importing",
+          "ready",
+          "failed"
+        ]
+      }
+    },
+    "securitySchemes": {
+      "token": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "system",
+      "description": "Health and version of the core"
+    },
+    {
+      "name": "videos",
+      "description": "Videos in the library"
+    }
+  ]
+}

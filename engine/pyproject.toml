@@ -1,0 +1,47 @@
+[project]
+name = "segno-engine"
+version = "0.1.0"
+description = "Segno analysis engine: turns piano videos into notes, scores and harmonic analysis."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "pydantic>=2.11",
+]
+
+[project.scripts]
+segno-engine = "segno_engine.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.13.9,<0.14.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.400",
+    "pytest>=8.4",
+    "ruff>=0.12",
+]
+# Command-line tools for prototypes: downloading test videos (yt-dlp needs a JavaScript
+# runtime for YouTube, provided by the deno package). Install with `uv sync --group tools`.
+tools = [
+    "deno>=2",
+    "yt-dlp[default]",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "PT"]
+
+[tool.pyright]
+include = ["src", "tests"]
+typeCheckingMode = "strict"
+pythonVersion = "3.13"
+venvPath = "."
+venv = ".venv"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["-ra", "--strict-markers"]

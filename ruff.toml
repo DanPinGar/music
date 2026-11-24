@@ -1,0 +1,2 @@
+# Python outside engine/ (e.g. scripts/) follows the engine's Ruff settings.
+extend = "engine/pyproject.toml"

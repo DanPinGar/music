@@ -1,0 +1,29 @@
+{
+  "name": "segno",
+  "private": true,
+  "description": "Segno: study Synthesia-style piano videos (player, navigation, transcription, harmony).",
+  "packageManager": "pnpm@11.10.0",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @segno/desktop tauri dev",
+    "build": "pnpm --filter @segno/desktop tauri build",
+    "dev:api": "cargo run -p segno-api -- serve",
+    "dev:ui": "pnpm --filter @segno/ui dev",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test": "pnpm -r --if-present test",
+    "gen:api": "pnpm --filter @segno/api-client generate",
+    "check": "pnpm check:ui && pnpm check:rust && pnpm check:engine",
+    "check:ui": "pnpm lint && pnpm typecheck && pnpm test && pnpm --filter @segno/ui build",
+    "check:rust": "cargo fmt --all --check && cargo clippy --workspace --all-targets --locked -- -D warnings && cargo test --workspace --locked",
+    "check:engine": "uv run --directory engine ruff check . && uv run --directory engine ruff format --check . && uv run --directory engine pyright && uv run --directory engine pytest",
+    "tools": "uv run --no-project scripts/fetch_tools.py"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.6.8",
+    "lefthook": "^2.2.2"
+  }
+}

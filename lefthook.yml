@@ -1,0 +1,16 @@
+# Git hooks (https://lefthook.dev), installed by `pnpm install`.
+# Fast checks on the staged files only; CI runs the full suite.
+pre-commit:
+  parallel: true
+  jobs:
+    - name: biome
+      glob: "*.{js,jsx,ts,tsx,json,jsonc,css,md}"
+      run: pnpm biome check --no-errors-on-unmatched --files-ignore-unknown=true {staged_files}
+
+    - name: rustfmt
+      glob: "*.rs"
+      run: cargo fmt --all --check
+
+    - name: ruff
+      glob: "*.py"
+      run: uv run --project engine ruff check {staged_files} && uv run --project engine ruff format --check {staged_files}
