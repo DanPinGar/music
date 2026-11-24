@@ -35,11 +35,16 @@ Everything else stays inside the repository: `node_modules`, `engine/.venv` and 
 ## Getting started
 
 ```sh
-pnpm install                     # JavaScript dependencies (also installs the git hooks)
-uv sync --directory engine       # Python engine and its dev tools in engine/.venv
-pnpm tools                       # ffmpeg (LGPL build) into .tools/ffmpeg
-pnpm dev                         # run the desktop app with hot reload
+pnpm install                              # JavaScript dependencies (also installs the git hooks)
+uv sync --directory engine --all-groups   # engine/.venv: engine, dev tools, yt-dlp and Deno
+pnpm tools                                # ffmpeg (LGPL build) into .tools/ffmpeg
+pnpm dev                                  # run the desktop app with hot reload
 ```
+
+A plain `uv sync` keeps only the `dev` group and uninstalls yt-dlp and Deno: keep `--all-groups`.
+
+To launch, drive and screenshot the app from scripts or AI agents, see
+[.claude/skills/run-segno/SKILL.md](.claude/skills/run-segno/SKILL.md).
 
 To work on the UI in a browser, run the API and the UI separately:
 
@@ -64,7 +69,7 @@ pnpm check:engine                # Ruff, Pyright and pytest
 | Regenerate the TypeScript API client after changing the Rust API | `pnpm gen:api`                                                            |
 | Build the Windows installer                                      | `pnpm build`                                                              |
 | Regenerate the app icons from `apps/desktop/app-icon.svg`        | `pnpm --filter @segno/desktop tauri icon app-icon.svg -o src-tauri/icons` |
-| Install yt-dlp and Deno in the engine's environment              | `uv sync --directory engine --all-groups`                                 |
+| Smoke-test the real app (dev mode, then the built app)           | `node .claude/skills/run-segno/driver.mjs --smoke` and `--smoke prod`     |
 
 ## Conventions
 

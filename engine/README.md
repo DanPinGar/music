@@ -5,11 +5,14 @@ artifacts (notes, scores, harmonic analysis). The Rust core starts it and talks 
 JSON Lines over stdin/stdout (see `src/segno_engine/protocol.py`).
 
 ```sh
-uv sync                                   # create .venv with the engine and dev tools
+uv sync --all-groups                      # .venv: engine, dev tools, yt-dlp and Deno
 uv run segno-engine worker --stdio        # serve the core (try typing {"type": "ping"})
 uv run pytest                             # tests
 uv run ruff check . && uv run pyright     # lint and types
-uv sync --group tools                     # yt-dlp + Deno, for downloading test videos
 ```
+
+`uv sync` makes `.venv` match the selected groups exactly; without `--all-groups` it removes
+the `tools` group (yt-dlp and Deno, used to download test videos). `uv run` never removes
+packages.
 
 See [docs/PLAN.md](../docs/PLAN.md) for the transcription and analysis pipeline.

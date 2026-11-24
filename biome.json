@@ -12,7 +12,8 @@
       "!**/packages/api-client/openapi.json",
       "!**/packages/api-client/src/schema.d.ts",
       "!**/src-tauri/gen",
-      "!**/src-tauri/capabilities"
+      "!**/src-tauri/capabilities",
+      "!**/.claude/skills/**/*.md"
     ]
   },
   "formatter": {
