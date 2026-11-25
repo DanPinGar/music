@@ -9,6 +9,10 @@ pub enum DomainError {
     #[error("invalid input: {0}")]
     Invalid(String),
 
+    /// A tool or service the operation needs is missing (e.g. ffmpeg is not installed).
+    #[error("unavailable: {0}")]
+    Unavailable(String),
+
     #[error("storage failure")]
     Storage(#[source] Box<dyn std::error::Error + Send + Sync>),
 }

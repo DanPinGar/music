@@ -4,8 +4,17 @@ import type { components, paths } from "./schema";
 export type { components, paths };
 
 export type Video = components["schemas"]["VideoDto"];
+export type ImportVideoRequest = components["schemas"]["ImportVideoRequest"];
 export type SystemInfo = components["schemas"]["SystemInfo"];
 export type Problem = components["schemas"]["Problem"];
+
+/**
+ * Address of a video's media for `<video src>`. Media elements cannot send headers, so the
+ * token travels as a query parameter (the API accepts both).
+ */
+export function mediaUrl({ baseUrl, token }: ApiClientOptions, videoId: string): string {
+  return `${baseUrl}/videos/${encodeURIComponent(videoId)}/media?token=${encodeURIComponent(token)}`;
+}
 
 export interface ApiClientOptions {
   /** Address of the core API, e.g. http://127.0.0.1:52817 */

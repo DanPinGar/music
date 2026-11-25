@@ -12,6 +12,7 @@ publish = false
 [workspace.dependencies]
 segno-api = { path = "crates/api" }
 segno-domain = { path = "crates/domain" }
+segno-media = { path = "crates/media" }
 segno-storage = { path = "crates/storage" }
 
 anyhow = "1"
@@ -25,9 +26,9 @@ sqlx = { version = "0.8", default-features = false, features = ["chrono", "macro
 subtle = "2"
 tempfile = "3"
 thiserror = "2"
-tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal"] }
+tokio = { version = "1", features = ["fs", "macros", "net", "process", "rt-multi-thread", "signal"] }
 tower = { version = "0.5", features = ["util"] }
-tower-http = { version = "0.6", features = ["cors", "trace"] }
+tower-http = { version = "0.6", features = ["cors", "fs", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 utoipa = { version = "5", features = ["chrono", "uuid"] }

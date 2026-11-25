@@ -1,8 +1,13 @@
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::body::Body;
+use axum::extract::{Path, Request, State};
+use axum::http::StatusCode;
+use axum::response::Response;
 use chrono::{DateTime, Utc};
-use segno_domain::{Video, VideoId, VideoSource, VideoStatus};
-use serde::Serialize;
+use segno_domain::{Video, VideoId, VideoSource, VideoStatus, library};
+use serde::{Deserialize, Serialize};
+use tower::ServiceExt;
+use tower_http::services::ServeFile;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -104,4 +109,75 @@ pub async fn get_video(
 ) -> Result<Json<VideoDto>, ApiError> {
     let video = state.videos.get(VideoId::from_uuid(id)).await?;
     Ok(Json(video.into()))
+}
+
+/// A video file on this computer to add to the library.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct ImportVideoRequest {
+    /// Absolute path of the file.
+    pub path: String,
+    /// Title in the library; the file name when omitted.
+    pub title: Option<String>,
+}
+
+/// Imports a video file from this computer into the library, ready to play.
+#[utoipa::path(
+    post,
+    path = "/videos/import",
+    tag = "videos",
+    security(("token" = [])),
+    request_body = ImportVideoRequest,
+    responses(
+        (status = 201, description = "The imported video", body = VideoDto),
+        (status = 400, description = "Not a file, or not a readable video", body = Problem),
+        (status = 401, description = "Missing or invalid token", body = Problem),
+        (status = 503, description = "ffmpeg is not available", body = Problem)
+    )
+)]
+pub async fn import_video(
+    State(state): State<AppState>,
+    Json(request): Json<ImportVideoRequest>,
+) -> Result<(StatusCode, Json<VideoDto>), ApiError> {
+    let probe = state.probe.as_deref().ok_or_else(|| {
+        ApiError::Unavailable("ffmpeg was not found, so videos cannot be imported".into())
+    })?;
+    let video = library::import_local_video(
+        state.videos.as_ref(),
+        probe,
+        state.media_files.as_ref(),
+        std::path::Path::new(&request.path),
+        request.title.as_deref(),
+    )
+    .await?;
+    Ok((StatusCode::CREATED, Json(video.into())))
+}
+
+/// The video's media file, for the player. Supports `Range` requests, so jumps load only what
+/// they need. Media elements cannot send headers: pass the token as the `token` query parameter.
+#[utoipa::path(
+    get,
+    path = "/videos/{id}/media",
+    tag = "videos",
+    security(("token" = [])),
+    params(("id" = Uuid, Path, description = "Video id")),
+    responses(
+        (status = 200, description = "The whole media file"),
+        (status = 206, description = "The byte range asked for with a Range header"),
+        (status = 401, description = "Missing or invalid token", body = Problem),
+        (status = 404, description = "No such video, or it has no media yet", body = Problem)
+    )
+)]
+pub async fn get_media(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    request: Request,
+) -> Result<Response, ApiError> {
+    let video = state.videos.get(VideoId::from_uuid(id)).await?;
+    let relative = video
+        .media_file
+        .ok_or_else(|| ApiError::NotFound(format!("video {id} has no media yet")))?;
+    let file = state.media_files.resolve(&relative)?;
+    // Serving a file cannot fail at this level (its error type is `Infallible`).
+    let Ok(response) = ServeFile::new(file).oneshot(request).await;
+    Ok(response.map(Body::new))
 }

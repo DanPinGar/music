@@ -256,6 +256,16 @@ Measured with a built-in diagnostics overlay and treated as release criteria:
 | Timeline scrolling, zooming and scrubbing          | 60 fps                  |
 | Audible gap when a loop wraps around               | < 30 ms (aim: seamless) |
 
+Baseline measured on 25 November 2026, playing the original YouTube download (1080p60 H.264 with a keyframe every 5.07 s) in the app on the development laptop:
+
+| Interaction                       | Measured                    | Budget   |
+| --------------------------------- | --------------------------- | -------- |
+| Jump to a random point (10 jumps) | median 237 ms, worst 297 ms | < 100 ms |
+| One frame back / forward          | about 230 ms each way       | < 50 ms  |
+| First play after opening a video  | starts about 0.85 s late    | —        |
+
+Every seek decodes again from the previous keyframe, even one frame forward. This is the evidence for the seek-optimised proxy (keyframe every ~0.5 s) below.
+
 #### Navigation units
 
 The same gestures work at every scale:
@@ -489,8 +499,8 @@ Each phase ends with something usable and a verifiable exit criterion.
 
 **Phase 1A: Base app (features 1–4), navigation first**
 
-1. Local file import and media preparation: seek proxy, thumbnails, waveform peaks and attacks.
-2. The player with the full navigation layer: two-level timeline, shortcuts, frame and attack stepping, tap-tempo grid, go-to, navigation history, return to start, replay and speed.
+1. Local file import and media preparation: seek proxy, thumbnails, waveform peaks and attacks. _(Import done: ffprobe, hard link or copy into the library, media served with Range requests. Media preparation next.)_
+2. The player with the full navigation layer: two-level timeline, shortcuts, frame and attack stepping, tap-tempo grid, go-to, navigation history, return to start, replay and speed. _(First version done: play/pause, ±2 s, ±10 s, frame steps, start/end, speed, replay. The rest after the proxy.)_
 3. Markers, sections, A-B loops, pre-roll, count-in and speed trainer.
 4. Comments anchored to time.
 5. YouTube downloads, chapters as markers, and the library (search, tags, remembered state).

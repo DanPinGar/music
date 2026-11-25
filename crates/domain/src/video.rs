@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{DomainError, Result};
+use crate::{DomainError, MediaInfo, Result};
 
 /// Identifier of a video in the library.
 ///
@@ -133,11 +133,22 @@ pub struct Video {
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub status: VideoStatus,
+    /// Playable media, relative to the library folder (e.g. `media/<id>/original.mp4`).
+    pub media_file: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
 
 impl Video {
+    /// Copies the technical facts of the media into the entry.
+    pub fn apply_media_info(&mut self, info: &MediaInfo) {
+        self.duration_ms = Some(info.duration_ms);
+        self.fps = info.fps;
+        self.width = info.width;
+        self.height = info.height;
+        self.updated_at = Utc::now();
+    }
+
     /// Creates a library entry that is still being imported.
     pub fn new_importing(
         source: VideoSource,
@@ -160,6 +171,7 @@ impl Video {
             width: None,
             height: None,
             status: VideoStatus::Importing,
+            media_file: None,
             created_at: now,
             updated_at: now,
         })

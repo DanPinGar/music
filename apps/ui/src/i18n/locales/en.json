@@ -10,8 +10,15 @@
   "library": {
     "title": "Library",
     "subtitle": "Your videos, ready to study.",
+    "import": "Import video",
+    "pickTitle": "Choose a video to import",
+    "importing": "Importing {{name}}…",
+    "imported": "{{title}} imported",
+    "importFailed": "Could not import {{name}}",
+    "notVideos": "Only video files can be imported (MP4, MKV, WebM, MOV…).",
+    "dropHere": "Drop videos here to import them",
     "emptyTitle": "Your library is empty",
-    "emptyBody": "Soon you will be able to download videos from YouTube or import your own. Meanwhile, explore the commands with",
+    "emptyBody": "Import a video with the button above, by dropping it on this window, or with",
     "error": "The library could not be loaded.",
     "status": {
       "importing": "Importing",
@@ -21,7 +28,12 @@
   },
   "player": {
     "title": "Player",
-    "empty": "Open a video from your library to study it here."
+    "empty": "Open a video from your library to study it here.",
+    "notFound": "This video is not in the library",
+    "play": "Play",
+    "pause": "Pause",
+    "position": "Position",
+    "speed": "Speed"
   },
   "palette": {
     "title": "Command palette",
@@ -40,7 +52,20 @@
     "showShortcuts": "Show keyboard shortcuts",
     "goToLibrary": "Go to the library",
     "goToPlayer": "Go to the player",
-    "toggleLanguage": "Switch language (Spanish / English)"
+    "toggleLanguage": "Switch language (Spanish / English)",
+    "importVideo": "Import a video",
+    "togglePlay": "Play / pause",
+    "replay": "Replay the last 3 seconds",
+    "slower": "Slower (−5 %)",
+    "faster": "Faster (+5 %)",
+    "prevFrame": "Previous frame",
+    "nextFrame": "Next frame",
+    "stepBack": "Back 2 seconds",
+    "stepForward": "Forward 2 seconds",
+    "longBack": "Back 10 seconds",
+    "longForward": "Forward 10 seconds",
+    "goToStart": "Go to the start",
+    "goToEnd": "Go to the end"
   },
   "commandGroups": {
     "general": "General",
@@ -56,7 +81,8 @@
     "connecting": "Connecting to the core…",
     "connected": "Segno {{version}}",
     "disconnected": "No connection to the core",
-    "library": "Library: {{path}}"
+    "library": "Library: {{path}}",
+    "noFfmpeg": "ffmpeg not found: videos cannot be imported"
   },
   "language": {
     "other": "Español",

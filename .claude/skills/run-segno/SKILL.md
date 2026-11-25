@@ -1,13 +1,14 @@
 ---
 name: run-segno
-description: Build, run, launch, drive, screenshot or smoke-test the Segno desktop app (Tauri 2 + React UI in WebView2 + embedded Rust API) on Windows, or run its core API and Python engine on their own. Use when asked to start Segno, check a UI or API change in the real app, take a screenshot of it, or poke the running app or its API.
+description: Build, run, launch, drive, screenshot or smoke-test the Segno desktop app (Tauri 2 + React UI in WebView2 + embedded Rust API) on Windows, or run its core API and Python engine on their own. Use when asked to start Segno, check a UI or API change in the real app, import or play a video in it, take a screenshot of it, or poke the running app or its API.
 ---
 
 Segno is a Tauri 2 desktop app: a React UI in WebView2 that talks to a Rust core API embedded
 in the same process (random port and token on every run), plus a Python engine. Drive it with
 `.claude/skills/run-segno/driver.mjs`: it launches the real app with WebView2's DevTools port
-open, attaches Playwright over CDP and runs commands read from stdin. Verified on Windows 11,
-the only platform set up so far.
+open, attaches Playwright over CDP and runs commands read from stdin. Every launch uses a fresh
+test library in `target/run-segno/library`, never the user's own. Verified on Windows 11, the
+only platform set up so far.
 
 All paths are relative to the repository root.
 
@@ -30,7 +31,7 @@ Rust; rustup installs that version on first use. Restart VS Code and terminals a
 ```bash
 pnpm install                              # JS dependencies, playwright-core for the driver, git hooks
 uv sync --directory engine --all-groups   # engine/.venv with dev tools, yt-dlp and Deno
-pnpm tools                                # ffmpeg into .tools/ffmpeg (not needed to run the app yet)
+pnpm tools                                # ffmpeg into .tools/ffmpeg: needed to import videos
 ```
 
 ## Run (agent path)
@@ -38,20 +39,22 @@ pnpm tools                                # ffmpeg into .tools/ffmpeg (not neede
 One-shot check, the first thing to run after a change:
 
 ```bash
-node .claude/skills/run-segno/driver.mjs --smoke        # dev mode: Vite + cargo run, ~15 s once Rust is built
-node .claude/skills/run-segno/driver.mjs --smoke prod   # built app: real CSP and origin, ~20 s
+node .claude/skills/run-segno/driver.mjs --smoke        # dev mode: Vite + cargo run, ~25 s once Rust is built
+node .claude/skills/run-segno/driver.mjs --smoke prod   # built app: real CSP and origin, ~25 s
 ```
 
-It prints `PASS`/`FAIL` per check (status bar fed by the API, `Ctrl+K` palette running a
-command, `?` dialog, `Ctrl+2`/`Ctrl+1`, language toggle, `GET /videos` with the session token,
-no console errors or HTTP errors), saves screenshots, closes the app and exits 0 only if
+It prints `PASS`/`FAIL` for 18 checks: the status bar fed by the API, the `Ctrl+K` palette
+running a command, the `?` dialog, `Ctrl+2`/`Ctrl+1`, the language toggle, `GET /videos` with the
+session token, importing a 5-second 60 fps clip made with ffmpeg, the player loading it, `Space`
+playing and pausing, `.` stepping exactly one frame, `→` jumping 2 s, `-` slowing to 95 %, and no
+console errors or HTTP errors. It saves screenshots, closes the app and exits 0 only if
 everything passed.
 
 To drive the app step by step, pipe a script of commands. There is no tmux on Windows; each
 line runs after the previous one finishes, and the app is closed when the input ends:
 
 ```bash
-printf 'launch\napi\nget /system\nget /videos/00000000-0000-0000-0000-000000000000\nss library\ntext footer\npress Control+k\nwait [data-slot=command-input]\ntype player\nss palette\nclick [data-value="nav.player"]\neval location.hash\nconsole\nquit\n' | node .claude/skills/run-segno/driver.mjs
+printf 'launch\napi\nimport test-clip\nwait video\nsleep 1500\npress Space\nsleep 1500\npress Space\ntext [data-testid=player-time]\npress Home\npress .\ntext [data-testid=player-time]\nss player\nget /videos\nconsole\nquit\n' | node .claude/skills/run-segno/driver.mjs
 ```
 
 Running `node .claude/skills/run-segno/driver.mjs` in a terminal gives a `segno>` prompt for
@@ -62,33 +65,36 @@ language the app is set to.
 Screenshots go to `target/run-segno/shots/`, the app's output to `target/run-segno/app.log`
 and the production build's output to `target/run-segno/build.log`.
 
-| command                             | what it does                                                                                                                  |
-| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `launch [dev\|prod]`                | start the app and attach. `dev` runs `pnpm dev`; `prod` builds with the UI embedded and runs `target/debug/segno-desktop.exe` |
-| `ss [name]`                         | screenshot of the window: `target/run-segno/shots/<name>.png`                                                                 |
-| `press <key>`                       | one key press, with Playwright names: `Control+k`, `?`, `Control+2`, `Escape`                                                 |
-| `type <text>`                       | type into the focused element                                                                                                 |
-| `click <css>` / `click-text <text>` | click through the DOM (buttons, links, palette items)                                                                         |
-| `wait <css>`                        | wait up to 10 s for an element                                                                                                |
-| `text [css]`                        | visible text of an element, or of the whole page                                                                              |
-| `eval <js>`                         | evaluate an expression in the page and print it as JSON                                                                       |
-| `goto <route>`                      | change the hash route, e.g. `goto /player`                                                                                    |
-| `api`                               | `{base_url, token}` of the embedded API, read through Tauri IPC                                                               |
-| `get <path>`                        | `GET` the embedded API with the token and print status and body                                                               |
-| `console`                           | console errors and warnings, HTTP errors and failed requests since `launch`                                                   |
-| `smoke`                             | the `--smoke` checks on the running app                                                                                       |
-| `sleep <ms>`                        | pause a piped script                                                                                                          |
-| `cleanup`                           | stop app and Vite processes left from earlier runs (also `--cleanup`)                                                         |
-| `quit`                              | close the window, stop everything and exit                                                                                    |
+| command | what it does |
+|---|---|
+| `launch [dev\|prod]` | start the app with a fresh test library and attach. `dev` runs `pnpm dev`; `prod` builds with the UI embedded and runs `target/debug/segno-desktop.exe` |
+| `import <path\|test-clip>` | import a video through the API and open it in the player; `test-clip` makes a 5 s 1280×720 60 fps clip with ffmpeg |
+| `ss [name]` | screenshot of the window: `target/run-segno/shots/<name>.png` |
+| `press <key>` | one key press, with Playwright names: `Space`, `Control+k`, `?`, `.`, `ArrowRight`, `Home` |
+| `type <text>` | type into the focused element |
+| `click <css>` / `click-text <text>` | click through the DOM (buttons, links, palette items) |
+| `wait <css>` | wait up to 10 s for an element |
+| `text [css]` | visible text of an element, or of the whole page; the player's clock is `[data-testid=player-time]` |
+| `eval <js>` | evaluate an expression in the page and print it as JSON |
+| `goto <route>` | change the hash route, e.g. `goto /player` |
+| `api` | `{base_url, token}` of the embedded API, read through Tauri IPC |
+| `get <path>` | `GET` the embedded API with the token and print status and body |
+| `console` | console errors and warnings, HTTP errors and failed requests since `launch` |
+| `smoke` | the `--smoke` checks on the running app |
+| `sleep <ms>` | pause a piped script |
+| `cleanup` | stop app and Vite processes left from earlier runs (also `--cleanup`) |
+| `quit` | close the window, stop everything and exit |
 
 ## Direct invocation (no desktop app)
 
-For changes that only touch the core API: serve it on `127.0.0.1:7700` with the token `dev`.
+For changes that only touch the core API: serve a library folder on `127.0.0.1:7700` with the
+token `dev`. The clip below is the one `import test-clip` or `--smoke` makes.
 
 ```bash
 cargo build -p segno-api
-./target/debug/segno-api.exe serve --db target/run-segno/api-dev.db &
+./target/debug/segno-api.exe serve --library target/run-segno/api-library &
 curl -s --retry 30 --retry-connrefused --retry-delay 1 http://127.0.0.1:7700/health
+curl -s -H "Authorization: Bearer dev" -H "Content-Type: application/json" -d "{\"path\": \"$(pwd -W)/target/run-segno/test-clip.mp4\"}" http://127.0.0.1:7700/videos/import
 curl -s -H "Authorization: Bearer dev" http://127.0.0.1:7700/videos
 kill %1
 ```
@@ -111,8 +117,9 @@ pnpm dev   # builds and opens the window with hot reload; closing the window sto
 pnpm check
 ```
 
-Biome, both type checks, Vitest (21 tests), the UI build, rustfmt, clippy with warnings as
-errors, cargo test (19 tests), Ruff, Pyright in strict mode and pytest (7 tests). All pass.
+Biome, both type checks, Vitest (29 tests), the UI build, rustfmt, clippy with warnings as
+errors, cargo test (41 tests, including real ffmpeg runs), Ruff, Pyright in strict mode and
+pytest (7 tests). All pass.
 
 ## Gotchas
 
@@ -123,12 +130,21 @@ errors, cargo test (19 tests), Ruff, Pyright in strict mode and pytest (7 tests)
 - **Force-killing the app loses its latest `localStorage` writes.** A language change made just
   before a hard kill was gone on the next launch: WebView2 writes storage lazily. That is why
   `quit` closes the window and only kills what is still running 8 s later.
+- **Each `launch` wipes and recreates `target/run-segno/library`.** Set `SEGNO_LIBRARY_DIR` to
+  drive the app with another library; the driver then leaves it as it is.
 - **DevTools opens only with `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222`
   in the app's environment.** It passes unchanged through pnpm, the Tauri CLI and `cargo run`.
   `SEGNO_CDP_PORT` changes the port; a second driver refuses to launch while one is running.
-- **Dev mode skips the CSP.** Vite serves the UI at `http://localhost:5173`; only the built app
-  (`http://tauri.localhost`) enforces the CSP and the production CORS origin. Use
-  `--smoke prod` for changes to CSP, CORS, assets or `tauri.conf.json`.
+- **Dev mode does not reproduce the production CSP.** In the built app Tauri adds nonces to the
+  CSP, and with a nonce present browsers ignore `'unsafe-inline'`: inline styles (sonner's
+  toasts) were blocked only under `--smoke prod`. `tauri.conf.json` sets
+  `dangerousDisableAssetCspModification` for `style-src` because of it. Use `--smoke prod` for
+  changes to CSP, CORS, assets or `tauri.conf.json`.
+- **The first play after opening a video starts about 0.85 s late** (audio device and decoder
+  warming up). The smoke test waits for `readyState` 4 and for the clock to advance instead of
+  sleeping a fixed time.
+- **Seeking cancels the video's in-flight range requests** (`net::ERR_ABORTED`). That is normal;
+  the driver ignores it for media requests and reports every other failed request.
 - **A console 404 without a URL is usually the favicon.** Chromium fetches it outside the page's
   network events, so Playwright never sees the response. A missing favicon failed the smoke
   test until `apps/ui/public/favicon.svg` was added.

@@ -1,6 +1,6 @@
 [package]
 name = "segno-storage"
-description = "Segno storage adapters: SQLite repositories for the domain ports."
+description = "Segno storage adapters: the SQLite database and the media folder of the library."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,10 +12,10 @@ async-trait.workspace = true
 chrono.workspace = true
 segno-domain.workspace = true
 sqlx.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
-tokio.workspace = true
 
 [lints]
 workspace = true

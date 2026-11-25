@@ -7,10 +7,12 @@ pre-commit:
       glob: "*.{js,jsx,ts,tsx,json,jsonc,css,md}"
       run: pnpm biome check --no-errors-on-unmatched --files-ignore-unknown=true {staged_files}
 
+    # scripts/hook-env.sh puts cargo and uv on the PATH even in editors started before they
+    # were installed.
     - name: rustfmt
       glob: "*.rs"
-      run: cargo fmt --all --check
+      run: . scripts/hook-env.sh && cargo fmt --all --check
 
     - name: ruff
       glob: "*.py"
-      run: uv run --project engine ruff check {staged_files} && uv run --project engine ruff format --check {staged_files}
+      run: . scripts/hook-env.sh && uv run --project engine ruff check {staged_files} && uv run --project engine ruff format --check {staged_files}

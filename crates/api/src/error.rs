@@ -21,6 +21,10 @@ pub enum ApiError {
     #[error("{0}")]
     BadRequest(String),
 
+    /// A tool the request needs is missing (e.g. ffmpeg).
+    #[error("{0}")]
+    Unavailable(String),
+
     #[error("internal error")]
     Internal(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
@@ -47,6 +51,7 @@ impl ApiError {
             Self::Forbidden(_) => StatusCode::FORBIDDEN,
             Self::NotFound(_) => StatusCode::NOT_FOUND,
             Self::BadRequest(_) => StatusCode::BAD_REQUEST,
+            Self::Unavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
             Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -57,6 +62,7 @@ impl From<DomainError> for ApiError {
         match err {
             DomainError::NotFound { .. } => Self::NotFound(err.to_string()),
             DomainError::Invalid(message) => Self::BadRequest(message),
+            DomainError::Unavailable(message) => Self::Unavailable(message),
             DomainError::Storage(source) => Self::Internal(source),
         }
     }

@@ -57,11 +57,19 @@ impl SqliteStore {
                 .map_err(DomainError::storage)?;
         Ok(version.unwrap_or(0))
     }
+
+    /// Identity of this library, created with the database and never changed.
+    pub async fn library_id(&self) -> Result<String> {
+        sqlx::query_scalar("SELECT value FROM settings WHERE key = 'library_id'")
+            .fetch_one(&self.pool)
+            .await
+            .map_err(DomainError::storage)
+    }
 }
 
 macro_rules! video_columns {
     () => {
-        "id, source, source_url, title, channel, duration_ms, fps, width, height, status, created_at, updated_at"
+        "id, source, source_url, title, channel, duration_ms, fps, width, height, status, media_file, created_at, updated_at"
     };
 }
 
@@ -77,6 +85,7 @@ struct VideoRow {
     width: Option<i64>,
     height: Option<i64>,
     status: String,
+    media_file: Option<String>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }
@@ -96,6 +105,7 @@ impl TryFrom<VideoRow> for Video {
             width: dimension(row.width)?,
             height: dimension(row.height)?,
             status: row.status.parse()?,
+            media_file: row.media_file,
             created_at: row.created_at,
             updated_at: row.updated_at,
         })
@@ -143,7 +153,7 @@ impl VideoRepository for SqliteStore {
         sqlx::query(concat!(
             "INSERT INTO videos (",
             video_columns!(),
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         ))
         .bind(video.id.to_string())
         .bind(video.source.as_str())
@@ -155,6 +165,7 @@ impl VideoRepository for SqliteStore {
         .bind(video.width.map(i64::from))
         .bind(video.height.map(i64::from))
         .bind(video.status.as_str())
+        .bind(&video.media_file)
         .bind(video.created_at)
         .bind(video.updated_at)
         .execute(&self.pool)
@@ -180,6 +191,7 @@ mod tests {
         video.fps = Some(59.94);
         video.width = Some(1920);
         video.height = Some(1080);
+        video.media_file = Some(format!("media/{}/original.mp4", video.id));
         video
     }
 
@@ -223,6 +235,25 @@ mod tests {
         let store = SqliteStore::in_memory().await.unwrap();
         let err = store.get(VideoId::new()).await.unwrap_err();
         assert!(matches!(err, DomainError::NotFound { .. }));
+    }
+
+    #[tokio::test]
+    async fn every_library_has_its_own_lasting_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("library.db");
+        let id = SqliteStore::open(&path)
+            .await
+            .unwrap()
+            .library_id()
+            .await
+            .unwrap();
+        assert_eq!(id.len(), 32);
+
+        let reopened = SqliteStore::open(&path).await.unwrap();
+        assert_eq!(reopened.library_id().await.unwrap(), id);
+
+        let other = SqliteStore::in_memory().await.unwrap();
+        assert_ne!(other.library_id().await.unwrap(), id);
     }
 
     #[tokio::test]

@@ -18,9 +18,10 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 anyhow.workspace = true
 segno-api.workspace = true
-segno-storage.workspace = true
+segno-media.workspace = true
 serde.workspace = true
 tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

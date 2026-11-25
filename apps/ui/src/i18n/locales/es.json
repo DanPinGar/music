@@ -10,8 +10,15 @@
   "library": {
     "title": "Biblioteca",
     "subtitle": "Tus vídeos, listos para estudiar.",
+    "import": "Importar vídeo",
+    "pickTitle": "Elige un vídeo para importar",
+    "importing": "Importando {{name}}…",
+    "imported": "{{title}} importado",
+    "importFailed": "No se ha podido importar {{name}}",
+    "notVideos": "Solo se pueden importar archivos de vídeo (MP4, MKV, WebM, MOV…).",
+    "dropHere": "Suelta aquí los vídeos para importarlos",
     "emptyTitle": "Tu biblioteca está vacía",
-    "emptyBody": "Pronto podrás descargar vídeos de YouTube o importar los tuyos. Mientras tanto, explora los comandos con",
+    "emptyBody": "Importa un vídeo con el botón de arriba, soltándolo sobre esta ventana o con",
     "error": "No se ha podido cargar la biblioteca.",
     "status": {
       "importing": "Importando",
@@ -21,7 +28,12 @@
   },
   "player": {
     "title": "Reproductor",
-    "empty": "Abre un vídeo de tu biblioteca para estudiarlo aquí."
+    "empty": "Abre un vídeo de tu biblioteca para estudiarlo aquí.",
+    "notFound": "Este vídeo no está en la biblioteca",
+    "play": "Reproducir",
+    "pause": "Pausa",
+    "position": "Posición",
+    "speed": "Velocidad"
   },
   "palette": {
     "title": "Paleta de comandos",
@@ -40,7 +52,20 @@
     "showShortcuts": "Ver los atajos de teclado",
     "goToLibrary": "Ir a la biblioteca",
     "goToPlayer": "Ir al reproductor",
-    "toggleLanguage": "Cambiar de idioma (español / inglés)"
+    "toggleLanguage": "Cambiar de idioma (español / inglés)",
+    "importVideo": "Importar un vídeo",
+    "togglePlay": "Reproducir / pausar",
+    "replay": "Repetir los últimos 3 segundos",
+    "slower": "Más lento (−5 %)",
+    "faster": "Más rápido (+5 %)",
+    "prevFrame": "Fotograma anterior",
+    "nextFrame": "Fotograma siguiente",
+    "stepBack": "Retroceder 2 segundos",
+    "stepForward": "Avanzar 2 segundos",
+    "longBack": "Retroceder 10 segundos",
+    "longForward": "Avanzar 10 segundos",
+    "goToStart": "Ir al principio",
+    "goToEnd": "Ir al final"
   },
   "commandGroups": {
     "general": "General",
@@ -56,7 +81,8 @@
     "connecting": "Conectando con el núcleo…",
     "connected": "Segno {{version}}",
     "disconnected": "Sin conexión con el núcleo",
-    "library": "Biblioteca: {{path}}"
+    "library": "Biblioteca: {{path}}",
+    "noFfmpeg": "ffmpeg no encontrado: no se pueden importar vídeos"
   },
   "language": {
     "other": "English",

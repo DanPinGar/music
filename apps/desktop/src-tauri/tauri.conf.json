@@ -27,7 +27,8 @@
         "media-src": "'self' blob: http://127.0.0.1:*",
         "style-src": "'self' 'unsafe-inline'",
         "font-src": "'self' data:"
-      }
+      },
+      "dangerousDisableAssetCspModification": ["style-src"]
     }
   },
   "bundle": {

@@ -1,12 +1,10 @@
-//! Segno desktop shell: opens the library database, starts the embedded core API on
-//! 127.0.0.1 and tells the UI where to find it.
+//! Segno desktop shell: opens the library, starts the embedded core API on 127.0.0.1 and
+//! tells the UI where to find it.
 
 use std::net::{Ipv4Addr, SocketAddr};
-use std::sync::Arc;
+use std::path::PathBuf;
 
-use anyhow::Context;
-use segno_api::{AppState, SecurityConfig, SystemInfo};
-use segno_storage::SqliteStore;
+use segno_api::SecurityConfig;
 use serde::Serialize;
 use tauri::Manager;
 use tracing_subscriber::EnvFilter;
@@ -41,6 +39,7 @@ pub fn run() {
         .init();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let config = tauri::async_runtime::block_on(start_core(app.handle()))?;
             app.manage(config);
@@ -53,19 +52,16 @@ pub fn run() {
 
 /// Opens the library and serves the API on a random loopback port with a fresh token.
 async fn start_core(app: &tauri::AppHandle) -> anyhow::Result<ApiConfig> {
-    let library_dir = app.path().app_data_dir()?.join("library");
-    std::fs::create_dir_all(&library_dir)
-        .with_context(|| format!("creating {}", library_dir.display()))?;
-    let store = SqliteStore::open(&library_dir.join("library.db")).await?;
-
-    let state = AppState {
-        system: Arc::new(SystemInfo {
-            version: env!("CARGO_PKG_VERSION").into(),
-            library_path: Some(library_dir.display().to_string()),
-            schema_version: store.schema_version().await?,
-        }),
-        videos: Arc::new(store),
-    };
+    let app_data = app.path().app_data_dir()?;
+    // SEGNO_LIBRARY_DIR points tests and agents at a throwaway library, away from the user's.
+    let library_dir = std::env::var_os("SEGNO_LIBRARY_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| app_data.join("library"));
+    let mut tool_dirs = vec![app_data.join("tools").join("ffmpeg").join("bin")];
+    if cfg!(debug_assertions) {
+        tool_dirs.push(segno_media::dev_tools_dir());
+    }
+    let state = segno_api::local_state(&library_dir, &tool_dirs).await?;
 
     let listener =
         tokio::net::TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0))).await?;

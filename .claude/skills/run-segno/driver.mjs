@@ -29,6 +29,11 @@ const SHOT_DIR = process.env.SCREENSHOT_DIR ?? path.join(OUT_DIR, "shots");
 const APP_LOG = path.join(OUT_DIR, "app.log");
 const BUILD_LOG = path.join(OUT_DIR, "build.log");
 const DESKTOP_EXE = path.join(ROOT, "target", "debug", "segno-desktop.exe");
+// Unless SEGNO_LIBRARY_DIR says otherwise, every launch gets a fresh library here, so agents
+// never touch the user's own library.
+const TEST_LIBRARY = path.join(OUT_DIR, "library");
+const FFMPEG = path.join(ROOT, ".tools", "ffmpeg", "bin", "ffmpeg.exe");
+const TEST_CLIP = path.join(OUT_DIR, "test-clip.mp4");
 // The first `pnpm dev` compiles the whole Rust workspace (about 4 minutes on a laptop).
 const LAUNCH_TIMEOUT_MS = 10 * 60_000;
 const APP_PAGE = /localhost:5173|tauri\.localhost/;
@@ -192,9 +197,12 @@ async function attach() {
   page.on("response", (response) => {
     if (response.status() >= 400) problems.push(`HTTP ${response.status()}: ${response.url()}`);
   });
-  page.on("requestfailed", (request) =>
-    problems.push(`request failed: ${request.url()} ${request.failure()?.errorText ?? ""}`),
-  );
+  page.on("requestfailed", (request) => {
+    const reason = request.failure()?.errorText ?? "";
+    // Chromium cancels in-flight range requests of a <video> whenever it seeks: not a failure.
+    if (request.resourceType() === "media" && reason.includes("ERR_ABORTED")) return;
+    problems.push(`request failed: ${request.url()} ${reason}`);
+  });
   await page.waitForSelector("footer", { timeout: 30_000 });
 }
 
@@ -205,8 +213,12 @@ async function launch(mode) {
     throw new Error(`port ${CDP_PORT} already serves DevTools (an earlier run?): run "cleanup"`);
   }
   launchedHere = true;
+  const library = process.env.SEGNO_LIBRARY_DIR ?? TEST_LIBRARY;
+  if (!process.env.SEGNO_LIBRARY_DIR) fs.rmSync(TEST_LIBRARY, { recursive: true, force: true });
+  log(`library: ${library}${process.env.SEGNO_LIBRARY_DIR ? "" : " (fresh test library)"}`);
   const env = toolEnv({
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${CDP_PORT}`,
+    SEGNO_LIBRARY_DIR: library,
   });
   if (mode === "prod") {
     log(`building the app with the UI embedded (log: ${rel(BUILD_LOG)})...`);
@@ -255,6 +267,40 @@ async function quit() {
 async function apiConfig() {
   // Same IPC call the UI makes at start-up (apps/ui/src/platform/platform.ts).
   return need().evaluate(() => window.__TAURI_INTERNALS__.invoke("api_config"));
+}
+
+/** A 5-second 1280×720 clip at 60 fps with a 440 Hz tone, made once with the repo's ffmpeg. */
+function makeTestClip() {
+  if (fs.existsSync(TEST_CLIP)) return TEST_CLIP;
+  if (!fs.existsSync(FFMPEG)) throw new Error("ffmpeg is missing: run `pnpm tools`");
+  const result = spawnSync(
+    FFMPEG,
+    [
+      ...["-v", "error", "-y"],
+      ...["-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=60:duration=5"],
+      ...["-f", "lavfi", "-i", "sine=frequency=440:duration=5"],
+      ...["-c:v", "libopenh264", "-c:a", "aac", "-shortest", TEST_CLIP],
+    ],
+    { encoding: "utf8", windowsHide: true },
+  );
+  if (result.status !== 0) throw new Error(`ffmpeg could not make the test clip: ${result.stderr}`);
+  return TEST_CLIP;
+}
+
+/** State of the player's video element. */
+function videoState(app) {
+  return app.evaluate(() => {
+    const video = document.querySelector("video");
+    return video
+      ? {
+          time: video.currentTime,
+          paused: video.paused,
+          rate: video.playbackRate,
+          duration: video.duration,
+          ready: video.readyState,
+        }
+      : null;
+  });
 }
 
 /** The end-to-end flow verified when this skill was written. Returns true when all pass. */
@@ -307,7 +353,8 @@ async function smoke() {
 
   await app.keyboard.press("Control+2");
   await sleep(300);
-  check("Ctrl+2 opens the player", app.url().endsWith("#/player"), app.url());
+  // The Player tab reopens the last video of this library, if any.
+  check("Ctrl+2 opens the player", /#\/(player|videos\/)/.test(app.url()), app.url());
   await app.keyboard.press("Control+1");
   await sleep(300);
   check("Ctrl+1 returns to the library", app.url().endsWith("#/"), app.url());
@@ -330,6 +377,78 @@ async function smoke() {
     videos === 200,
     `HTTP ${videos}`,
   );
+
+  // Import a generated clip through the API and study it in the player.
+  const imported = await COMMANDS.import("test-clip", { quiet: true });
+  check(
+    "POST /videos/import adds a clip made with ffmpeg",
+    imported?.status === "ready",
+    imported ? `${imported.width}×${imported.height} @ ${imported.fps} fps` : "import failed",
+  );
+  if (imported) {
+    const loaded = await app
+      // HAVE_ENOUGH_DATA: playable through. With only the first frame (2), the first play
+      // stalls for a moment while the decoder starts.
+      .waitForFunction(() => (document.querySelector("video")?.readyState ?? 0) >= 4, null, {
+        timeout: 15_000,
+      })
+      .then(
+        () => true,
+        () => false,
+      );
+    const state = await videoState(app);
+    check(
+      "the player loads the media from the API",
+      loaded,
+      state ? `${state.duration.toFixed(2)} s` : "",
+    );
+
+    await app.keyboard.press("Space");
+    const started = Date.now();
+    const playing = await app
+      .waitForFunction(
+        () => {
+          const video = document.querySelector("video");
+          return video !== null && !video.paused && video.currentTime > 0.3;
+        },
+        null,
+        { timeout: 3_000 },
+      )
+      .then(
+        () => true,
+        () => false,
+      );
+    let now = await videoState(app);
+    check("Space plays", playing, `t = ${now?.time.toFixed(3)} after ${Date.now() - started} ms`);
+    await app.keyboard.press("Space");
+    await sleep(200);
+    now = await videoState(app);
+    check("Space pauses", now?.paused === true);
+
+    await app.keyboard.press("Home");
+    await app.keyboard.press(".");
+    await sleep(200);
+    now = await videoState(app);
+    check(
+      '"." steps exactly one frame at 60 fps',
+      Math.abs((now?.time ?? 0) - 1.5 / 60) < 0.001,
+      `t = ${now?.time.toFixed(4)}`,
+    );
+    await app.keyboard.press("ArrowRight");
+    await sleep(200);
+    now = await videoState(app);
+    check(
+      '"→" jumps 2 seconds',
+      Math.abs((now?.time ?? 0) - (2 + 1.5 / 60)) < 0.001,
+      `t = ${now?.time.toFixed(4)}`,
+    );
+    await app.keyboard.press("-");
+    await sleep(100);
+    now = await videoState(app);
+    check('"-" slows down to 95 %', now?.rate === 0.95, `rate = ${now?.rate}`);
+    await app.keyboard.press("+");
+    await COMMANDS.ss("smoke-4-player");
+  }
   check(
     "no console errors, warnings or failed requests",
     problems.length === 0,
@@ -403,6 +522,23 @@ const COMMANDS = {
   },
   async api() {
     log(JSON.stringify(await apiConfig()));
+  },
+  /** Imports a file (or `test-clip`, generated with ffmpeg) and opens it in the player. */
+  async import(filePath, options = {}) {
+    const file = filePath === "test-clip" ? makeTestClip() : path.resolve(ROOT, filePath);
+    const { base_url: baseUrl, token } = await apiConfig();
+    const response = await fetch(`${baseUrl}/videos/import`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ path: file }),
+    });
+    const body = await response.json().catch(() => null);
+    if (!options.quiet) log(`HTTP ${response.status} ${JSON.stringify(body)}`);
+    if (!response.ok) return null;
+    await need().evaluate((id) => {
+      window.location.hash = `/videos/${id}`;
+    }, body.id);
+    return body;
   },
   async get(apiPath, options = {}) {
     const { base_url: baseUrl, token } = await apiConfig();

@@ -3,12 +3,11 @@
 
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
-use segno_api::{AppState, SecurityConfig, SystemInfo};
-use segno_storage::SqliteStore;
+use segno_api::SecurityConfig;
+use segno_media::dev_tools_dir;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
@@ -27,9 +26,9 @@ enum Command {
         /// Session token clients must present.
         #[arg(long, env = "SEGNO_API_TOKEN", default_value = "dev")]
         token: String,
-        /// Library database file (created if missing).
-        #[arg(long, default_value = "target/segno-dev.db")]
-        db: PathBuf,
+        /// Library folder: library.db and the media (created if missing).
+        #[arg(long, default_value = "target/segno-dev-library")]
+        library: PathBuf,
         /// Origin allowed by CORS (repeatable).
         #[arg(long = "allow-origin", default_value = "http://localhost:5173")]
         allowed_origins: Vec<String>,
@@ -48,9 +47,9 @@ async fn main() -> anyhow::Result<()> {
         Command::Serve {
             port,
             token,
-            db,
+            library,
             allowed_origins,
-        } => serve(port, token, db, allowed_origins).await,
+        } => serve(port, token, library, allowed_origins).await,
         Command::Openapi { out } => export_openapi(out),
     }
 }
@@ -58,7 +57,7 @@ async fn main() -> anyhow::Result<()> {
 async fn serve(
     port: u16,
     token: String,
-    db: PathBuf,
+    library: PathBuf,
     allowed_origins: Vec<String>,
 ) -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -67,20 +66,7 @@ async fn serve(
         )
         .init();
 
-    if let Some(parent) = db.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let store = SqliteStore::open(&db)
-        .await
-        .with_context(|| format!("opening {}", db.display()))?;
-    let state = AppState {
-        system: Arc::new(SystemInfo {
-            version: env!("CARGO_PKG_VERSION").into(),
-            library_path: db.parent().map(|dir| dir.display().to_string()),
-            schema_version: store.schema_version().await?,
-        }),
-        videos: Arc::new(store),
-    };
+    let state = segno_api::local_state(&library, &[dev_tools_dir()]).await?;
     let origins: Vec<&str> = allowed_origins.iter().map(String::as_str).collect();
     let security = SecurityConfig::local(token, port, &origins);
 

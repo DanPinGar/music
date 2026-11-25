@@ -6,7 +6,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { ApiProvider } from "./api/api-context";
+import { Toaster } from "sonner";
+import { CoreProvider } from "./api/api-context";
 import { router } from "./app/router";
 import { CommandRegistryProvider } from "./commands/commands-context";
 import { CommandRegistry } from "./commands/registry";
@@ -14,7 +15,9 @@ import { TooltipProvider } from "./components/ui/tooltip";
 import { detectPlatform } from "./platform/platform";
 
 async function bootstrap(root: HTMLElement) {
-  const api = createApiClient(await detectPlatform().apiConfig());
+  const platform = detectPlatform();
+  const config = await platform.apiConfig();
+  const core = { client: createApiClient(config), config, platform };
   const queryClient = new QueryClient({
     defaultOptions: { queries: { staleTime: 30_000, retry: 1 } },
   });
@@ -22,15 +25,16 @@ async function bootstrap(root: HTMLElement) {
 
   createRoot(root).render(
     <StrictMode>
-      <ApiProvider client={api}>
+      <CoreProvider core={core}>
         <QueryClientProvider client={queryClient}>
           <CommandRegistryProvider registry={commands}>
             <TooltipProvider>
               <RouterProvider router={router} />
+              <Toaster theme="dark" position="bottom-right" richColors />
             </TooltipProvider>
           </CommandRegistryProvider>
         </QueryClientProvider>
-      </ApiProvider>
+      </CoreProvider>
     </StrictMode>,
   );
 }

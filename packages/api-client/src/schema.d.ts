@@ -55,6 +55,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/videos/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Imports a video file from this computer into the library, ready to play. */
+        post: operations["import_video"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/videos/{id}": {
         parameters: {
             query?: never;
@@ -72,6 +89,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/videos/{id}/media": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The video's media file, for the player. Supports `Range` requests, so jumps load only what
+         *     they need. Media elements cannot send headers: pass the token as the `token` query parameter.
+         */
+        get: operations["get_media"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -80,6 +117,13 @@ export interface components {
         Health: {
             /** @description Always `ok` while the API is serving. */
             status: string;
+        };
+        /** @description A video file on this computer to add to the library. */
+        ImportVideoRequest: {
+            /** @description Absolute path of the file. */
+            path: string;
+            /** @description Title in the library; the file name when omitted. */
+            title?: string | null;
         };
         /** @description RFC 9457 problem details (`application/problem+json`). */
         Problem: {
@@ -97,6 +141,10 @@ export interface components {
         };
         /** @description Facts about the running core, shown in the UI's status bar. */
         SystemInfo: {
+            /** @description Version of the ffmpeg in use; `None` when it was not found. */
+            ffmpeg_version?: string | null;
+            /** @description Identity of the library, stable for its whole life (unlike its folder). */
+            library_id: string;
             /** @description Folder holding the library database and media, when served locally. */
             library_path?: string | null;
             /**
@@ -227,6 +275,57 @@ export interface operations {
             };
         };
     };
+    import_video: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportVideoRequest"];
+            };
+        };
+        responses: {
+            /** @description The imported video */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoDto"];
+                };
+            };
+            /** @description Not a file, or not a readable video */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Missing or invalid token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description ffmpeg is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     get_video: {
         parameters: {
             query?: never;
@@ -258,6 +357,52 @@ export interface operations {
                 };
             };
             /** @description No such video */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    get_media: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Video id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The whole media file */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The byte range asked for with a Range header */
+            206: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description No such video, or it has no media yet */
             404: {
                 headers: {
                     [name: string]: unknown;

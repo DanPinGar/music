@@ -5,6 +5,7 @@
 //! session token (see [`SecurityConfig`]).
 
 mod error;
+mod local;
 mod routes;
 mod security;
 
@@ -12,7 +13,7 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::middleware;
-use segno_domain::VideoRepository;
+use segno_domain::{MediaProbe, MediaStore, VideoRepository};
 use serde::Serialize;
 use tokio::net::TcpListener;
 use tower_http::trace::TraceLayer;
@@ -22,12 +23,17 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 pub use error::{ApiError, Problem};
+pub use local::local_state;
 pub use security::SecurityConfig;
 
 /// Shared state for the handlers.
 #[derive(Clone)]
 pub struct AppState {
     pub videos: Arc<dyn VideoRepository>,
+    /// The library's media files.
+    pub media_files: Arc<dyn MediaStore>,
+    /// Reads media files; `None` when ffmpeg is not available, so imports are refused.
+    pub probe: Option<Arc<dyn MediaProbe>>,
     pub system: Arc<SystemInfo>,
 }
 
@@ -36,10 +42,14 @@ pub struct AppState {
 pub struct SystemInfo {
     /// Version of the core.
     pub version: String,
+    /// Identity of the library, stable for its whole life (unlike its folder).
+    pub library_id: String,
     /// Folder holding the library database and media, when served locally.
     pub library_path: Option<String>,
     /// Latest database migration applied.
     pub schema_version: i64,
+    /// Version of the ffmpeg in use; `None` when it was not found.
+    pub ffmpeg_version: Option<String>,
 }
 
 #[derive(OpenApi)]
@@ -77,6 +87,8 @@ fn protected_routes() -> OpenApiRouter<AppState> {
         .routes(routes!(routes::system::get_system))
         .routes(routes!(routes::videos::list_videos))
         .routes(routes!(routes::videos::get_video))
+        .routes(routes!(routes::videos::import_video))
+        .routes(routes!(routes::videos::get_media))
 }
 
 /// The OpenAPI document of the API (source of the generated TypeScript client).

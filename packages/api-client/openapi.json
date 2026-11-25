@@ -102,6 +102,72 @@
         ]
       }
     },
+    "/videos/import": {
+      "post": {
+        "tags": [
+          "videos"
+        ],
+        "summary": "Imports a video file from this computer into the library, ready to play.",
+        "operationId": "import_video",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportVideoRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The imported video",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not a file, or not a readable video",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "ffmpeg is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "token": []
+          }
+        ]
+      }
+    },
     "/videos/{id}": {
       "get": {
         "tags": [
@@ -159,6 +225,60 @@
           }
         ]
       }
+    },
+    "/videos/{id}/media": {
+      "get": {
+        "tags": [
+          "videos"
+        ],
+        "summary": "The video's media file, for the player. Supports `Range` requests, so jumps load only what\nthey need. Media elements cannot send headers: pass the token as the `token` query parameter.",
+        "operationId": "get_media",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Video id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The whole media file"
+          },
+          "206": {
+            "description": "The byte range asked for with a Range header"
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such video, or it has no media yet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "token": []
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -173,6 +293,26 @@
           "status": {
             "type": "string",
             "description": "Always `ok` while the API is serving."
+          }
+        }
+      },
+      "ImportVideoRequest": {
+        "type": "object",
+        "description": "A video file on this computer to add to the library.",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute path of the file."
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Title in the library; the file name when omitted."
           }
         }
       },
@@ -213,9 +353,21 @@
         "description": "Facts about the running core, shown in the UI's status bar.",
         "required": [
           "version",
+          "library_id",
           "schema_version"
         ],
         "properties": {
+          "ffmpeg_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Version of the ffmpeg in use; `None` when it was not found."
+          },
+          "library_id": {
+            "type": "string",
+            "description": "Identity of the library, stable for its whole life (unlike its folder)."
+          },
           "library_path": {
             "type": [
               "string",
