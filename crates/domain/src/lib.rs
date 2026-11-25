@@ -10,5 +10,7 @@ mod media;
 mod video;
 
 pub use error::{DomainError, Result};
-pub use media::{MediaInfo, MediaProbe, MediaStore};
+pub use media::{
+    MediaInfo, MediaPreparer, MediaProbe, MediaStore, PreparationInput, ThumbnailSprite,
+};
 pub use video::{Video, VideoId, VideoRepository, VideoSource, VideoStatus};

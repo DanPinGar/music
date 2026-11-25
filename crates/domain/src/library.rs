@@ -2,8 +2,11 @@
 
 use std::path::Path;
 
+use chrono::Utc;
+
 use crate::{
-    DomainError, MediaProbe, MediaStore, Result, Video, VideoRepository, VideoSource, VideoStatus,
+    DomainError, MediaPreparer, MediaProbe, MediaStore, PreparationInput, Result, ThumbnailSprite,
+    Video, VideoId, VideoRepository, VideoSource, VideoStatus,
 };
 
 /// Imports a video file from this computer: checks that it is a readable video, places it in
@@ -46,6 +49,97 @@ pub async fn import_local_video(
     Ok(video)
 }
 
+/// The steps of preparing a video for navigation, in the order they run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreparationStage {
+    SeekProxy,
+    Thumbnails,
+    Peaks,
+}
+
+/// Prepares a video's media for instant navigation: the seek proxy first, then the thumbnails
+/// (drawn from the proxy's keyframes) and the waveform peaks. Each result is saved as soon as
+/// it exists, so an interruption keeps the finished parts, and parts already made are skipped.
+/// A failure is recorded on the video (`preparation_error`) before being returned.
+pub async fn prepare_video(
+    videos: &dyn VideoRepository,
+    store: &dyn MediaStore,
+    preparer: &dyn MediaPreparer,
+    id: VideoId,
+    progress: &(dyn Fn(PreparationStage, f64) + Send + Sync),
+) -> Result<Video> {
+    let mut video = videos.get(id).await?;
+    match prepare_missing_parts(&mut video, videos, store, preparer, progress).await {
+        Ok(()) => Ok(video),
+        Err(err) => {
+            video.preparation_error = Some(err.to_string());
+            video.updated_at = Utc::now();
+            videos.update(&video).await?;
+            Err(err)
+        }
+    }
+}
+
+async fn prepare_missing_parts(
+    video: &mut Video,
+    videos: &dyn VideoRepository,
+    store: &dyn MediaStore,
+    preparer: &dyn MediaPreparer,
+    progress: &(dyn Fn(PreparationStage, f64) + Send + Sync),
+) -> Result<()> {
+    let original = store.resolve(
+        video
+            .media_file
+            .as_deref()
+            .ok_or_else(|| DomainError::Invalid(format!("video {} has no media", video.id)))?,
+    )?;
+    let input = PreparationInput {
+        duration_ms: video.duration_ms.unwrap_or(0),
+        fps: video.fps.unwrap_or(30.0),
+        width: video.width.unwrap_or(0),
+        height: video.height.unwrap_or(0),
+    };
+
+    let proxy = match &video.proxy_file {
+        Some(relative) => store.resolve(relative)?,
+        None => {
+            let (relative, path) = store.derived(video.id, "proxy.mp4").await?;
+            progress(PreparationStage::SeekProxy, 0.0);
+            preparer
+                .make_seek_proxy(&original, &path, input, &|done| {
+                    progress(PreparationStage::SeekProxy, done)
+                })
+                .await?;
+            video.proxy_file = Some(relative);
+            save(video, videos).await?;
+            path
+        }
+    };
+
+    if video.thumbnails_file.is_none() {
+        let (relative, path) = store.derived(video.id, "thumbnails.jpg").await?;
+        progress(PreparationStage::Thumbnails, 0.0);
+        let sprite = ThumbnailSprite::for_video(input.duration_ms, input.width, input.height);
+        preparer.make_thumbnails(&proxy, &path, sprite).await?;
+        video.thumbnails_file = Some(relative);
+        save(video, videos).await?;
+    }
+
+    if video.peaks_file.is_none() {
+        let (relative, path) = store.derived(video.id, "peaks.json").await?;
+        progress(PreparationStage::Peaks, 0.0);
+        preparer.make_peaks(&original, &path).await?;
+        video.peaks_file = Some(relative);
+        save(video, videos).await?;
+    }
+    Ok(())
+}
+
+async fn save(video: &mut Video, videos: &dyn VideoRepository) -> Result<()> {
+    video.updated_at = Utc::now();
+    videos.update(video).await
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -86,6 +180,12 @@ mod tests {
             self.saved.lock().unwrap().push(video.clone());
             Ok(())
         }
+        async fn update(&self, video: &Video) -> Result<()> {
+            let mut saved = self.saved.lock().unwrap();
+            let slot = saved.iter_mut().find(|v| v.id == video.id).unwrap();
+            *slot = video.clone();
+            Ok(())
+        }
     }
 
     struct Probe(MediaInfo);
@@ -106,6 +206,10 @@ mod tests {
     impl MediaStore for Store {
         async fn store_original(&self, video: VideoId, _: &Path) -> Result<String> {
             Ok(format!("media/{video}/original.mp4"))
+        }
+        async fn derived(&self, video: VideoId, file_name: &str) -> Result<(String, PathBuf)> {
+            let relative = format!("media/{video}/{file_name}");
+            Ok((relative.clone(), PathBuf::from(relative)))
         }
         fn resolve(&self, relative: &str) -> Result<PathBuf> {
             Ok(PathBuf::from(relative))
@@ -212,5 +316,160 @@ mod tests {
             .unwrap_err();
         assert!(matches!(err, DomainError::Storage(_)));
         assert_eq!(store.removed.lock().unwrap().len(), 1);
+    }
+
+    /// Records what it was asked to make; can fail the seek proxy.
+    #[derive(Default)]
+    struct Preparer {
+        fail_proxy: bool,
+        made: Mutex<Vec<String>>,
+        sprite: Mutex<Option<ThumbnailSprite>>,
+    }
+
+    #[async_trait]
+    impl MediaPreparer for Preparer {
+        async fn make_seek_proxy(
+            &self,
+            _: &Path,
+            target: &Path,
+            input: PreparationInput,
+            progress: &(dyn Fn(f64) + Send + Sync),
+        ) -> Result<()> {
+            if self.fail_proxy {
+                return Err(DomainError::Invalid(
+                    "no encoder could make the proxy".into(),
+                ));
+            }
+            assert_eq!(input.fps, 60.0);
+            progress(0.5);
+            self.made.lock().unwrap().push(target.display().to_string());
+            Ok(())
+        }
+        async fn make_thumbnails(
+            &self,
+            source: &Path,
+            target: &Path,
+            sprite: ThumbnailSprite,
+        ) -> Result<()> {
+            assert!(
+                source.ends_with("proxy.mp4"),
+                "thumbnails come from the proxy"
+            );
+            *self.sprite.lock().unwrap() = Some(sprite);
+            self.made.lock().unwrap().push(target.display().to_string());
+            Ok(())
+        }
+        async fn make_peaks(&self, source: &Path, target: &Path) -> Result<()> {
+            assert!(
+                source.ends_with("original.mp4"),
+                "peaks come from the original"
+            );
+            self.made.lock().unwrap().push(target.display().to_string());
+            Ok(())
+        }
+    }
+
+    async fn imported(videos: &Videos) -> Video {
+        let file = existing_file();
+        import_local_video(
+            videos,
+            &Probe(video_info()),
+            &Store::default(),
+            file.path(),
+            None,
+        )
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn preparing_makes_and_records_every_part_in_order() {
+        let videos = Videos::default();
+        let video = imported(&videos).await;
+        assert!(video.needs_preparation());
+        let preparer = Preparer::default();
+        let stages = Mutex::new(Vec::new());
+
+        let prepared = prepare_video(
+            &videos,
+            &Store::default(),
+            &preparer,
+            video.id,
+            &|stage, done| {
+                stages.lock().unwrap().push((stage, done));
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(!prepared.needs_preparation());
+        assert_eq!(
+            prepared.proxy_file.as_deref(),
+            Some(format!("media/{}/proxy.mp4", video.id).as_str())
+        );
+        assert!(
+            prepared
+                .thumbnails_file
+                .unwrap()
+                .ends_with("thumbnails.jpg")
+        );
+        assert!(prepared.peaks_file.unwrap().ends_with("peaks.json"));
+        assert_eq!(preparer.made.lock().unwrap().len(), 3);
+        assert_eq!(preparer.sprite.lock().unwrap().unwrap().count, 142);
+        assert_eq!(
+            *stages.lock().unwrap(),
+            [
+                (PreparationStage::SeekProxy, 0.0),
+                (PreparationStage::SeekProxy, 0.5),
+                (PreparationStage::Thumbnails, 0.0),
+                (PreparationStage::Peaks, 0.0),
+            ]
+        );
+        assert!(!videos.get(video.id).await.unwrap().needs_preparation());
+    }
+
+    #[tokio::test]
+    async fn parts_already_made_are_skipped() {
+        let videos = Videos::default();
+        let mut video = imported(&videos).await;
+        video.proxy_file = Some(format!("media/{}/proxy.mp4", video.id));
+        videos.update(&video).await.unwrap();
+        let preparer = Preparer::default();
+
+        prepare_video(&videos, &Store::default(), &preparer, video.id, &|_, _| {})
+            .await
+            .unwrap();
+
+        let made = preparer.made.lock().unwrap();
+        assert_eq!(made.len(), 2);
+        assert!(!made.iter().any(|path| path.ends_with("proxy.mp4")));
+    }
+
+    #[tokio::test]
+    async fn a_failure_is_recorded_on_the_video() {
+        let videos = Videos::default();
+        let video = imported(&videos).await;
+        let preparer = Preparer {
+            fail_proxy: true,
+            ..Preparer::default()
+        };
+
+        let err = prepare_video(&videos, &Store::default(), &preparer, video.id, &|_, _| {})
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, DomainError::Invalid(_)));
+        let saved = videos.get(video.id).await.unwrap();
+        assert!(
+            saved
+                .preparation_error
+                .as_deref()
+                .unwrap()
+                .contains("no encoder")
+        );
+        assert!(
+            !saved.needs_preparation(),
+            "a failed video is not retried on its own"
+        );
     }
 }

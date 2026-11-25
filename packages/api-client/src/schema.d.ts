@@ -64,7 +64,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Imports a video file from this computer into the library, ready to play. */
+        /**
+         * Imports a video file from this computer into the library, ready to play, and queues its
+         *     preparation for instant navigation.
+         */
         post: operations["import_video"];
         delete?: never;
         options?: never;
@@ -97,10 +100,48 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * The video's media file, for the player. Supports `Range` requests, so jumps load only what
-         *     they need. Media elements cannot send headers: pass the token as the `token` query parameter.
+         * The video for the player: the copy made for instant seeking once it exists, the original
+         *     until then. Supports `Range` requests. Media elements cannot send headers: pass the token
+         *     as the `token` query parameter.
          */
         get: operations["get_media"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/videos/{id}/peaks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The audio waveform: `{"version": 1, "peaks_per_second": 100, "peaks": [min, max, …]}` with
+         *     values from -127 to 127.
+         */
+        get: operations["get_peaks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/videos/{id}/thumbnails": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The thumbnail sprite (JPEG); its layout is in the video's `thumbnails`. */
+        get: operations["get_thumbnails"];
         put?: never;
         post?: never;
         delete?: never;
@@ -125,6 +166,17 @@ export interface components {
             /** @description Title in the library; the file name when omitted. */
             title?: string | null;
         };
+        /** @description Progress of preparing a video for navigation. */
+        PreparationDto: {
+            /**
+             * Format: double
+             * @description The whole preparation, from 0 to 1.
+             */
+            progress: number;
+            stage: components["schemas"]["PreparationStageDto"];
+        };
+        /** @enum {string} */
+        PreparationStageDto: "queued" | "seek_proxy" | "thumbnails" | "peaks";
         /** @description RFC 9457 problem details (`application/problem+json`). */
         Problem: {
             /** @description Explanation specific to this occurrence. */
@@ -155,6 +207,24 @@ export interface components {
             /** @description Version of the core. */
             version: string;
         };
+        /**
+         * @description Layout of the thumbnail sprite: tile `n` shows the video at `n * interval_ms`, at column
+         *     `n % columns` and row `n / columns`.
+         */
+        ThumbnailsDto: {
+            /** Format: int32 */
+            columns: number;
+            /** Format: int32 */
+            count: number;
+            /** Format: int32 */
+            interval_ms: number;
+            /** Format: int32 */
+            rows: number;
+            /** Format: int32 */
+            tile_height: number;
+            /** Format: int32 */
+            tile_width: number;
+        };
         /** @description A video in the library. */
         VideoDto: {
             channel?: string | null;
@@ -164,14 +234,22 @@ export interface components {
             duration_ms?: number | null;
             /** Format: double */
             fps?: number | null;
+            /** @description Whether `/peaks` serves the audio waveform. */
+            has_peaks: boolean;
             /** Format: int32 */
             height?: number | null;
             /** Format: uuid */
             id: string;
+            preparation?: null | components["schemas"]["PreparationDto"];
+            /** @description Why the preparation failed, if it did. */
+            preparation_error?: string | null;
+            /** @description Whether `/media` already serves the copy made for instant seeking. */
+            seek_proxy: boolean;
             source: components["schemas"]["VideoSourceDto"];
             /** @description Original address, for downloaded videos. */
             source_url?: string | null;
             status: components["schemas"]["VideoStatusDto"];
+            thumbnails?: null | components["schemas"]["ThumbnailsDto"];
             title: string;
             /** Format: date-time */
             updated_at: string;
@@ -403,6 +481,84 @@ export interface operations {
                 };
             };
             /** @description No such video, or it has no media yet */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    get_peaks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Video id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The waveform peaks, as JSON */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description No such video, or no waveform yet */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    get_thumbnails: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Video id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The sprite, as a JPEG image */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description No such video, or no thumbnails yet */
             404: {
                 headers: {
                     [name: string]: unknown;

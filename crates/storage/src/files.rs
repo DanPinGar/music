@@ -50,6 +50,24 @@ impl MediaStore for LibraryFiles {
         Ok(format!("media/{video}/{file_name}"))
     }
 
+    async fn derived(&self, video: VideoId, file_name: &str) -> Result<(String, PathBuf)> {
+        let simple = !file_name.is_empty()
+            && file_name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
+            && !file_name.starts_with('.');
+        if !simple {
+            return Err(DomainError::Invalid(format!(
+                "not a plain file name: {file_name}"
+            )));
+        }
+        let dir = self.video_dir(video);
+        tokio::fs::create_dir_all(&dir)
+            .await
+            .map_err(DomainError::storage)?;
+        Ok((format!("media/{video}/{file_name}"), dir.join(file_name)))
+    }
+
     fn resolve(&self, relative: &str) -> Result<PathBuf> {
         let path = Path::new(relative);
         let inside = !path.as_os_str().is_empty()

@@ -43,12 +43,44 @@ node .claude/skills/run-segno/driver.mjs --smoke        # dev mode: Vite + cargo
 node .claude/skills/run-segno/driver.mjs --smoke prod   # built app: real CSP and origin, ~25 s
 ```
 
-It prints `PASS`/`FAIL` for 18 checks: the status bar fed by the API, the `Ctrl+K` palette
-running a command, the `?` dialog, `Ctrl+2`/`Ctrl+1`, the language toggle, `GET /videos` with the
-session token, importing a 5-second 60 fps clip made with ffmpeg, the player loading it, `Space`
-playing and pausing, `.` stepping exactly one frame, `→` jumping 2 s, `-` slowing to 95 %, and no
-console errors or HTTP errors. It saves screenshots, closes the app and exits 0 only if
-everything passed.
+It prints `PASS`/`FAIL` for 20 checks:
+
+- the status bar fed by the API, the `Ctrl+K` palette running a command, the `?` dialog,
+  `Ctrl+2`/`Ctrl+1` and the language toggle;
+- `GET /videos` with the session token and importing a 5-second 60 fps clip made with ffmpeg;
+- the core preparing it in the background (seek proxy, thumbnail sprite and waveform peaks) and
+  serving the thumbnails and peaks;
+- the player switching to the seek proxy and loading it;
+- `Space` playing and pausing, `.` stepping exactly one frame, `→` jumping 2 s and `-` slowing
+  to 95 %;
+- no console errors or HTTP errors.
+
+It saves screenshots, closes the app and exits 0 only if everything passed.
+
+### Measure navigation
+
+`bench` times what the navigation budget in `docs/PLAN.md` (4.2) measures, on the video open in
+the player: 10 jumps, 30 frame steps each way and 3 play starts after a jump. It first waits for
+the preparation (36 s for the 2:21 1080p60 video below). `bench original` measures the original
+file instead, which the driver serves itself (the API serves the proxy once it exists), then
+gives the player its source back:
+
+```bash
+printf 'launch prod\nimport eval/data/videos/7A12z9S4F8U.mp4\nbench\nbench original\nquit\n' | node .claude/skills/run-segno/driver.mjs
+```
+
+```
+{"source":"seek proxy","jumps":{"median":18,"p95":35,"max":35},"frameBack":{"median":18,"p95":26,"max":28},"frameForward":{"median":19,"p95":26,"max":27},"playStart":{"median":66,"p95":70,"max":70}}
+{"source":"original","jumps":{"median":201,"p95":260,"max":260},"frameBack":{"median":250,"p95":262,"max":263},"frameForward":{"median":249,"p95":263,"max":264},"playStart":{"median":79,"p95":279,"max":279}}
+```
+
+Milliseconds; the budget is p95 under 100 ms for jumps and under 50 ms for frame steps. The video
+is the reference one, git-ignored; download it once with:
+
+```bash
+mkdir -p eval/data/videos
+uv run --directory engine yt-dlp --ffmpeg-location ../.tools/ffmpeg/bin -f "bv*[vcodec^=avc1][height<=1080][fps>30]+ba[ext=m4a]/bv*[vcodec^=avc1][height<=1080]+ba[ext=m4a]/b" --merge-output-format mp4 -o "../eval/data/videos/%(id)s.%(ext)s" "https://www.youtube.com/watch?v=7A12z9S4F8U"
+```
 
 To drive the app step by step, pipe a script of commands. There is no tmux on Windows; each
 line runs after the previous one finishes, and the app is closed when the input ends:
@@ -81,6 +113,7 @@ and the production build's output to `target/run-segno/build.log`.
 | `get <path>` | `GET` the embedded API with the token and print status and body |
 | `console` | console errors and warnings, HTTP errors and failed requests since `launch` |
 | `smoke` | the `--smoke` checks on the running app |
+| `bench [now\|original]` | navigation timings of the open video, as JSON, after its preparation; `now` measures whatever is loaded without waiting, `original` the original file |
 | `sleep <ms>` | pause a piped script |
 | `cleanup` | stop app and Vite processes left from earlier runs (also `--cleanup`) |
 | `quit` | close the window, stop everything and exit |
@@ -117,9 +150,10 @@ pnpm dev   # builds and opens the window with hot reload; closing the window sto
 pnpm check
 ```
 
-Biome, both type checks, Vitest (29 tests), the UI build, rustfmt, clippy with warnings as
-errors, cargo test (41 tests, including real ffmpeg runs), Ruff, Pyright in strict mode and
-pytest (7 tests). All pass.
+Biome, both type checks, Vitest (31 tests), the UI build, rustfmt, clippy with warnings as
+errors, cargo test (59 tests, including real ffmpeg runs), Ruff, Pyright in strict mode and
+pytest (7 tests). All pass. Set `SEGNO_REQUIRE_FFMPEG=1` to make the ffmpeg tests fail, instead
+of skipping, when `.tools/ffmpeg` is missing (CI does).
 
 ## Gotchas
 
@@ -145,6 +179,12 @@ pytest (7 tests). All pass.
   sleeping a fixed time.
 - **Seeking cancels the video's in-flight range requests** (`net::ERR_ABORTED`). That is normal;
   the driver ignores it for media requests and reports every other failed request.
+- **`bench` varies between runs.** Frame steps on the same file measured a worst case of 52 ms in
+  one session and 30 ms in another. Run it at least twice before drawing conclusions, and compare
+  files in the same session (`bench` then `bench original`).
+- **Right after an import, `/media` serves the original.** The player switches to the proxy when
+  the preparation finishes (its URL gains `copy=seek-proxy`), keeping the position, speed and play
+  state. Anything that measures or screenshots playback should wait for that, as `bench` does.
 - **A console 404 without a URL is usually the favicon.** Chromium fetches it outside the page's
   network events, so Playwright never sees the response. A missing favicon failed the smoke
   test until `apps/ui/public/favicon.svg` was added.

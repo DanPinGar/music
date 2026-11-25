@@ -6,6 +6,7 @@
 
 mod error;
 mod local;
+mod preparations;
 mod routes;
 mod security;
 
@@ -24,6 +25,7 @@ use utoipa_axum::routes;
 
 pub use error::{ApiError, Problem};
 pub use local::local_state;
+pub use preparations::{Preparations, Progress};
 pub use security::SecurityConfig;
 
 /// Shared state for the handlers.
@@ -34,6 +36,8 @@ pub struct AppState {
     pub media_files: Arc<dyn MediaStore>,
     /// Reads media files; `None` when ffmpeg is not available, so imports are refused.
     pub probe: Option<Arc<dyn MediaProbe>>,
+    /// Prepares videos for navigation in the background; `None` without ffmpeg.
+    pub preparations: Option<Arc<Preparations>>,
     pub system: Arc<SystemInfo>,
 }
 
@@ -89,6 +93,8 @@ fn protected_routes() -> OpenApiRouter<AppState> {
         .routes(routes!(routes::videos::get_video))
         .routes(routes!(routes::videos::import_video))
         .routes(routes!(routes::videos::get_media))
+        .routes(routes!(routes::videos::get_thumbnails))
+        .routes(routes!(routes::videos::get_peaks))
 }
 
 /// The OpenAPI document of the API (source of the generated TypeScript client).

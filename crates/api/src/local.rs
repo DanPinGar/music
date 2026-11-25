@@ -2,11 +2,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Context;
-use segno_domain::MediaProbe;
-use segno_media::{FfprobeProbe, MediaTools};
+use segno_domain::{MediaPreparer, MediaProbe, MediaStore, VideoRepository};
+use segno_media::{FfmpegPreparer, FfprobeProbe, MediaTools};
 use segno_storage::{LibraryFiles, SqliteStore};
 
-use crate::{AppState, SystemInfo};
+use crate::{AppState, Preparations, SystemInfo};
 
 /// State for serving a library on this computer: `library.db` and the media folder inside
 /// `library_dir`, and ffmpeg from the first of `tool_dirs` that has it (or the PATH).
@@ -27,16 +27,39 @@ pub async fn local_state(library_dir: &Path, tool_dirs: &[PathBuf]) -> anyhow::R
         None => tracing::warn!("ffmpeg not found: importing videos is disabled"),
     }
 
+    let system = Arc::new(SystemInfo {
+        version: env!("CARGO_PKG_VERSION").into(),
+        library_id: store.library_id().await?,
+        library_path: Some(library_dir.display().to_string()),
+        schema_version: store.schema_version().await?,
+        ffmpeg_version: tools.as_ref().map(|tools| tools.version.clone()),
+    });
+    let videos: Arc<dyn VideoRepository> = Arc::new(store);
+    let media_files: Arc<dyn MediaStore> = Arc::new(LibraryFiles::new(library_dir));
+
+    let (probe, preparations) = match tools {
+        Some(tools) => {
+            let preparer: Arc<dyn MediaPreparer> = Arc::new(FfmpegPreparer::new(tools.clone()));
+            let preparations = Preparations::start(videos.clone(), media_files.clone(), preparer);
+            // Finish what an earlier run left half done.
+            for video in videos.list().await? {
+                if video.needs_preparation() {
+                    preparations.enqueue(video.id);
+                }
+            }
+            (
+                Some(Arc::new(FfprobeProbe::new(tools)) as Arc<dyn MediaProbe>),
+                Some(preparations),
+            )
+        }
+        None => (None, None),
+    };
+
     Ok(AppState {
-        system: Arc::new(SystemInfo {
-            version: env!("CARGO_PKG_VERSION").into(),
-            library_id: store.library_id().await?,
-            library_path: Some(library_dir.display().to_string()),
-            schema_version: store.schema_version().await?,
-            ffmpeg_version: tools.as_ref().map(|tools| tools.version.clone()),
-        }),
-        probe: tools.map(|tools| Arc::new(FfprobeProbe::new(tools)) as Arc<dyn MediaProbe>),
-        media_files: Arc::new(LibraryFiles::new(library_dir)),
-        videos: Arc::new(store),
+        videos,
+        media_files,
+        probe,
+        preparations,
+        system,
     })
 }

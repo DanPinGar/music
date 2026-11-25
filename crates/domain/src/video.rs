@@ -135,11 +135,28 @@ pub struct Video {
     pub status: VideoStatus,
     /// Playable media, relative to the library folder (e.g. `media/<id>/original.mp4`).
     pub media_file: Option<String>,
+    /// Copy of the media re-encoded for instant seeking (keyframe every ~0.5 s).
+    pub proxy_file: Option<String>,
+    /// Sprite of one thumbnail per second (see [`crate::ThumbnailSprite`]).
+    pub thumbnails_file: Option<String>,
+    /// Waveform peaks of the audio, as JSON.
+    pub peaks_file: Option<String>,
+    /// Why preparing the media for navigation failed, if it did.
+    pub preparation_error: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
 
 impl Video {
+    /// Whether the media still needs preparing for navigation (and has not failed already).
+    pub fn needs_preparation(&self) -> bool {
+        self.media_file.is_some()
+            && self.preparation_error.is_none()
+            && (self.proxy_file.is_none()
+                || self.thumbnails_file.is_none()
+                || self.peaks_file.is_none())
+    }
+
     /// Copies the technical facts of the media into the entry.
     pub fn apply_media_info(&mut self, info: &MediaInfo) {
         self.duration_ms = Some(info.duration_ms);
@@ -172,6 +189,10 @@ impl Video {
             height: None,
             status: VideoStatus::Importing,
             media_file: None,
+            proxy_file: None,
+            thumbnails_file: None,
+            peaks_file: None,
+            preparation_error: None,
             created_at: now,
             updated_at: now,
         })
@@ -188,6 +209,9 @@ pub trait VideoRepository: Send + Sync {
     async fn get(&self, id: VideoId) -> Result<Video>;
 
     async fn insert(&self, video: &Video) -> Result<()>;
+
+    /// Saves every field of an existing video, as given (callers set `updated_at`).
+    async fn update(&self, video: &Video) -> Result<()>;
 }
 
 #[cfg(test)]

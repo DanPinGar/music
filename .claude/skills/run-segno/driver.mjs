@@ -16,6 +16,7 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
+import http from "node:http";
 import path from "node:path";
 import readline from "node:readline";
 import { chromium } from "playwright-core";
@@ -303,6 +304,166 @@ function videoState(app) {
   });
 }
 
+/** GETs a path of the embedded API as JSON; null on an HTTP error. */
+async function apiJson(apiPath) {
+  const { base_url: baseUrl, token } = await apiConfig();
+  const response = await fetch(`${baseUrl}${apiPath}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return response.ok ? response.json() : null;
+}
+
+/** A video as the embedded API describes it, or null. */
+function fetchVideo(id) {
+  return apiJson(`/videos/${id}`);
+}
+
+/**
+ * Serves one file on 127.0.0.1 (a random port) with Range requests. The app's CSP allows media
+ * from there, so the player can load files the API does not serve.
+ */
+function serveFile(file) {
+  const size = fs.statSync(file).size;
+  const types = {
+    ".mp4": "video/mp4",
+    ".m4v": "video/mp4",
+    ".mov": "video/mp4",
+    ".webm": "video/webm",
+  };
+  const server = http.createServer((request, response) => {
+    const range = /^bytes=(\d*)-(\d*)$/.exec(request.headers.range ?? "");
+    let [start, end] = [0, size - 1];
+    if (range?.[1]) [start, end] = [Number(range[1]), Math.min(Number(range[2] || end), end)];
+    else if (range?.[2]) start = size - Number(range[2]);
+    response.writeHead(range ? 206 : 200, {
+      "Accept-Ranges": "bytes",
+      "Content-Length": end - start + 1,
+      "Content-Type": types[path.extname(file).toLowerCase()] ?? "application/octet-stream",
+      ...(range && { "Content-Range": `bytes ${start}-${end}/${size}` }),
+    });
+    fs.createReadStream(file, { start, end }).pipe(response);
+  });
+  return new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve(server)));
+}
+
+/** Points the player's video at `url` until it can play through; returns the previous source. */
+function swapSource(app, url) {
+  return app.evaluate(async (source) => {
+    const video = document.querySelector("video");
+    const previous = video.currentSrc;
+    const ready = new Promise((resolve) =>
+      video.addEventListener("canplaythrough", resolve, { once: true }),
+    );
+    video.src = source;
+    await ready;
+    return previous;
+  }, url);
+}
+
+/**
+ * The same timings on the open video's original file, which the API stops serving once the
+ * seek proxy exists: the driver serves it, and the player gets its source back afterwards.
+ */
+async function benchOriginal(app, id, fps) {
+  const system = await apiJson("/system");
+  const folder = path.join(system.library_path, "media", id);
+  const name = fs.readdirSync(folder).find((file) => file.startsWith("original."));
+  if (!name) throw new Error(`no original file in ${folder}`);
+  const server = await serveFile(path.join(folder, name));
+  const previous = await swapSource(app, `http://127.0.0.1:${server.address().port}/${name}`);
+  try {
+    return await bench(app, fps);
+  } finally {
+    await swapSource(app, previous);
+    server.close();
+    server.closeAllConnections();
+  }
+}
+
+/** Waits until the API has prepared the video for navigation; returns it, or null. */
+async function waitForPreparation(id, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  let lastReport = Date.now();
+  while (Date.now() < deadline) {
+    const video = await fetchVideo(id);
+    if (!video?.preparation) return video;
+    if (Date.now() - lastReport > 5_000) {
+      const { stage, progress } = video.preparation;
+      log(`  preparing ${video.title}: ${stage} ${Math.round(progress * 100)} %`);
+      lastReport = Date.now();
+    }
+    await sleep(500);
+  }
+  return null;
+}
+
+/**
+ * Times what the navigation budget measures, on the open video: jumps to ten points spread
+ * over it, then 30 frame steps back and 30 forward from the middle, enough to cross a whole
+ * keyframe interval (milliseconds from setting `currentTime` to the `seeked` event: the new
+ * frame is ready to show), then three play starts after a jump (from `play()` to the first
+ * new frame on screen).
+ */
+function bench(app, fps) {
+  return app.evaluate(async (framesPerSecond) => {
+    const video = document.querySelector("video");
+    const seeked = () =>
+      new Promise((resolve) => video.addEventListener("seeked", resolve, { once: true }));
+    const timed = async (time) => {
+      const start = performance.now();
+      video.currentTime = time;
+      await seeked();
+      return Math.round(performance.now() - start);
+    };
+    const summary = (values) => {
+      const sorted = [...values].sort((a, b) => a - b);
+      const p95 = sorted[Math.ceil(sorted.length * 0.95) - 1];
+      return { median: sorted[Math.floor(sorted.length / 2)], p95, max: sorted.at(-1) };
+    };
+    video.pause();
+    const fractions = [0.71, 0.14, 0.53, 0.04, 0.92, 0.42, 0.24, 0.64, 0.09, 0.84];
+    const jumps = [];
+    for (const fraction of fractions) jumps.push(await timed(fraction * video.duration));
+    await timed(video.duration / 2);
+    const back = [];
+    for (let i = 0; i < 30; i += 1) back.push(await timed(video.currentTime - 1 / framesPerSecond));
+    const forward = [];
+    for (let i = 0; i < 30; i += 1)
+      forward.push(await timed(video.currentTime + 1 / framesPerSecond));
+    const nextFrameShown = () =>
+      new Promise((resolve) => {
+        const from = video.currentTime;
+        const onFrame = (_now, frame) => {
+          if (frame.mediaTime > from + 0.001) resolve();
+          else video.requestVideoFrameCallback(onFrame);
+        };
+        video.requestVideoFrameCallback(onFrame);
+      });
+    const playStarts = [];
+    for (const fraction of [0.33, 0.61, 0.87]) {
+      await timed(fraction * video.duration);
+      const start = performance.now();
+      const shown = nextFrameShown();
+      await video.play();
+      await shown;
+      playStarts.push(Math.round(performance.now() - start));
+      video.pause();
+    }
+    return {
+      source: video.currentSrc.includes("copy=seek-proxy") ? "seek proxy" : "original",
+      jumps: summary(jumps),
+      frameBack: summary(back),
+      frameForward: summary(forward),
+      playStart: summary(playStarts),
+    };
+  }, fps);
+}
+
+/** Id of the video open in the player, from the URL. */
+function openVideoId(app) {
+  return /#\/videos\/([0-9a-f-]+)/.exec(app.url())?.[1] ?? null;
+}
+
 /** The end-to-end flow verified when this skill was written. Returns true when all pass. */
 async function smoke() {
   const app = need();
@@ -386,6 +547,34 @@ async function smoke() {
     imported ? `${imported.width}×${imported.height} @ ${imported.fps} fps` : "import failed",
   );
   if (imported) {
+    const prepared = await waitForPreparation(imported.id, 120_000);
+    check(
+      "the core prepares it for instant navigation (seek proxy, thumbnails, waveform)",
+      prepared?.seek_proxy === true &&
+        prepared.has_peaks === true &&
+        prepared.thumbnails !== null &&
+        !prepared.preparation_error,
+      prepared?.preparation_error ??
+        (prepared ? `${prepared.thumbnails?.count} thumbnails` : "not found or timed out"),
+    );
+    const sprite = await COMMANDS.get(`/videos/${imported.id}/thumbnails`, { quiet: true });
+    const peaks = await COMMANDS.get(`/videos/${imported.id}/peaks`, { quiet: true });
+    check(
+      "the API serves its thumbnails and waveform",
+      sprite === 200 && peaks === 200,
+      `HTTP ${sprite} / ${peaks}`,
+    );
+    const switched = await app
+      .waitForFunction(
+        () => document.querySelector("video")?.currentSrc.includes("copy=seek-proxy") === true,
+        null,
+        { timeout: 10_000 },
+      )
+      .then(
+        () => true,
+        () => false,
+      );
+    check("the player switches to the seek proxy", switched);
     const loaded = await app
       // HAVE_ENOUGH_DATA: playable through. With only the first frame (2), the first play
       // stalls for a moment while the decoder starts.
@@ -557,6 +746,28 @@ const COMMANDS = {
   },
   async smoke() {
     await smoke();
+  },
+  /**
+   * Navigation timings of the open video, after waiting for its preparation. `bench now`: of
+   * whatever the player has loaded, without waiting. `bench original`: of the original file.
+   */
+  async bench(mode) {
+    const id = openVideoId(need());
+    if (!id) throw new Error("open a video first (e.g. import test-clip)");
+    const video = mode === "now" ? await fetchVideo(id) : await waitForPreparation(id, 15 * 60_000);
+    if (mode === "original") {
+      log(JSON.stringify(await benchOriginal(need(), id, video?.fps ?? 30)));
+      return;
+    }
+    if (mode !== "now" && video?.seek_proxy) {
+      await need().waitForFunction(
+        () => document.querySelector("video")?.currentSrc.includes("copy=seek-proxy") === true,
+        null,
+        { timeout: 10_000 },
+      );
+    }
+    await need().waitForFunction(() => (document.querySelector("video")?.readyState ?? 0) >= 4);
+    log(JSON.stringify(await bench(need(), video?.fps ?? 30)));
   },
   cleanup() {
     cleanupLeftovers();

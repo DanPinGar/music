@@ -1,6 +1,6 @@
 [package]
 name = "segno-media"
-description = "Segno media adapters: locating ffmpeg and ffprobe and reading media files with them."
+description = "Segno media adapters: ffmpeg and ffprobe for reading media and preparing it for navigation."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -15,6 +15,7 @@ serde_json.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
+serde_json.workspace = true
 tempfile.workspace = true
 
 [lints]

@@ -9,8 +9,11 @@ use axum::Router;
 use axum::body::{Body, Bytes, to_bytes};
 use axum::http::header::{AUTHORIZATION, CONTENT_RANGE, CONTENT_TYPE, HOST, RANGE};
 use axum::http::{HeaderMap, Request, StatusCode};
-use segno_api::{AppState, SecurityConfig, SystemInfo};
-use segno_domain::{MediaInfo, MediaProbe, Video, VideoRepository, VideoSource};
+use segno_api::{AppState, Preparations, SecurityConfig, SystemInfo};
+use segno_domain::{
+    MediaInfo, MediaPreparer, MediaProbe, MediaStore, PreparationInput, ThumbnailSprite, Video,
+    VideoRepository, VideoSource,
+};
 use segno_storage::{LibraryFiles, SqliteStore};
 use serde_json::{Value, json};
 use tempfile::TempDir;
@@ -42,9 +45,48 @@ struct Harness {
     library: TempDir,
 }
 
-async fn harness_with(probe: Option<Arc<dyn MediaProbe>>) -> Harness {
+/// Writes tiny stand-ins for the derived files, so the routes have something to serve.
+struct FakePreparer;
+
+#[async_trait]
+impl MediaPreparer for FakePreparer {
+    async fn make_seek_proxy(
+        &self,
+        _: &Path,
+        target: &Path,
+        _: PreparationInput,
+        progress: &(dyn Fn(f64) + Send + Sync),
+    ) -> segno_domain::Result<()> {
+        progress(0.5);
+        std::fs::write(target, b"PROXY").unwrap();
+        Ok(())
+    }
+    async fn make_thumbnails(
+        &self,
+        _: &Path,
+        target: &Path,
+        _: ThumbnailSprite,
+    ) -> segno_domain::Result<()> {
+        std::fs::write(target, b"JPEG").unwrap();
+        Ok(())
+    }
+    async fn make_peaks(&self, _: &Path, target: &Path) -> segno_domain::Result<()> {
+        std::fs::write(
+            target,
+            br#"{"version":1,"peaks_per_second":100,"peaks":[]}"#,
+        )
+        .unwrap();
+        Ok(())
+    }
+}
+
+async fn harness_with(probe: Option<Arc<dyn MediaProbe>>, prepare: bool) -> Harness {
     let store = SqliteStore::in_memory().await.unwrap();
     let library = tempfile::tempdir().unwrap();
+    let videos: Arc<dyn VideoRepository> = Arc::new(store.clone());
+    let media_files: Arc<dyn MediaStore> = Arc::new(LibraryFiles::new(library.path()));
+    let preparations = prepare
+        .then(|| Preparations::start(videos.clone(), media_files.clone(), Arc::new(FakePreparer)));
     let state = AppState {
         system: Arc::new(SystemInfo {
             version: "test".into(),
@@ -53,9 +95,10 @@ async fn harness_with(probe: Option<Arc<dyn MediaProbe>>) -> Harness {
             schema_version: store.schema_version().await.unwrap(),
             ffmpeg_version: None,
         }),
-        videos: Arc::new(store.clone()),
-        media_files: Arc::new(LibraryFiles::new(library.path())),
+        videos,
+        media_files,
         probe,
+        preparations,
     };
     let app = segno_api::router(
         state,
@@ -68,8 +111,9 @@ async fn harness_with(probe: Option<Arc<dyn MediaProbe>>) -> Harness {
     }
 }
 
+/// Imports work; nothing is prepared, so `/media` keeps serving the original.
 async fn harness() -> Harness {
-    harness_with(Some(Arc::new(FakeProbe))).await
+    harness_with(Some(Arc::new(FakeProbe)), false).await
 }
 
 fn get(uri: &str) -> axum::http::request::Builder {
@@ -231,7 +275,7 @@ async fn importing_a_missing_file_is_a_400_problem() {
 
 #[tokio::test]
 async fn importing_without_ffmpeg_is_a_503_problem() {
-    let h = harness_with(None).await;
+    let h = harness_with(None, false).await;
     let file = h.library.path().join("clip.mp4");
     std::fs::write(&file, b"x").unwrap();
     let (status, _, body) = send(&h.app, import(&file)).await;
@@ -249,6 +293,68 @@ async fn videos_without_media_have_no_media_route() {
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
+#[tokio::test]
+async fn imported_videos_are_prepared_in_the_background() {
+    let h = harness_with(Some(Arc::new(FakeProbe)), true).await;
+    let file = h.library.path().join("clip.mp4");
+    std::fs::write(&file, b"ORIGINAL").unwrap();
+
+    let (status, _, video) = send(&h.app, import(&file)).await;
+    assert_eq!(status, StatusCode::CREATED);
+    let id = video["id"].as_str().unwrap().to_owned();
+
+    let mut prepared = Value::Null;
+    for _ in 0..100 {
+        let (_, _, current) = send(&h.app, empty(authorized(get(&format!("/videos/{id}"))))).await;
+        if current["seek_proxy"] == true && current["preparation"].is_null() {
+            prepared = current;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(prepared["has_peaks"], true, "{prepared}");
+    assert_eq!(prepared["thumbnails"]["count"], 142);
+    assert_eq!(prepared["thumbnails"]["tile_height"], 90);
+    assert!(prepared["preparation_error"].is_null());
+
+    let (status, _, bytes) = raw(
+        &h.app,
+        empty(get(&format!("/videos/{id}/media?token={TOKEN}"))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(&bytes[..], b"PROXY", "the player gets the seek proxy");
+    let (status, headers, _) = raw(
+        &h.app,
+        empty(get(&format!("/videos/{id}/thumbnails?token={TOKEN}"))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers[CONTENT_TYPE], "image/jpeg");
+    let (status, _, peaks) = send(
+        &h.app,
+        empty(authorized(get(&format!("/videos/{id}/peaks")))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(peaks["peaks_per_second"], 100);
+}
+
+#[tokio::test]
+async fn unprepared_videos_have_no_thumbnails_or_peaks_yet() {
+    let h = harness().await;
+    let file = h.library.path().join("clip.mp4");
+    std::fs::write(&file, b"x").unwrap();
+    let (_, _, video) = send(&h.app, import(&file)).await;
+    assert_eq!(video["seek_proxy"], false);
+    let id = video["id"].as_str().unwrap();
+    for route in ["thumbnails", "peaks"] {
+        let uri = format!("/videos/{id}/{route}?token={TOKEN}");
+        let (status, _, _) = send(&h.app, empty(get(&uri))).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{route}");
+    }
+}
+
 #[test]
 fn the_openapi_document_describes_every_route() {
     let doc = serde_json::to_value(segno_api::openapi()).unwrap();
@@ -260,6 +366,8 @@ fn the_openapi_document_describes_every_route() {
         "/videos/{id}",
         "/videos/import",
         "/videos/{id}/media",
+        "/videos/{id}/thumbnails",
+        "/videos/{id}/peaks",
     ] {
         assert!(paths.contains_key(path), "missing {path}");
     }

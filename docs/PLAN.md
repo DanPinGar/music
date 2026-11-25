@@ -115,8 +115,10 @@ Foundations: Tokio (async), `tracing` (logs and traces) and `thiserror` (errors)
 ```
 GET  POST        /videos                 library (POST: import a file or a URL)
 GET  PATCH  DEL  /videos/{id}
-GET              /videos/{id}/media      seek-optimised proxy, with Range support
-GET              /videos/{id}/nav        thumbnails, waveform peaks, attacks, beat grid
+GET              /videos/{id}/media      seek-optimised proxy (the original until it is made), with Range support
+GET              /videos/{id}/thumbnails thumbnail sprite, one tile a second
+GET              /videos/{id}/peaks      waveform peaks
+GET              /videos/{id}/nav        attacks, beat grid
 GET  PUT         /videos/{id}/state      remembered position, speed, loop, zoom
 CRUD             /videos/{id}/markers
 CRUD             /videos/{id}/comments
@@ -162,7 +164,7 @@ WS               /events                 progress, library changes, MIDI input
 ```
 Library/
 ├─ library.db                         SQLite (WAL mode)
-├─ media/<video_id>/                  original.mp4 · proxy.mp4 · thumbs/ · peaks/ · onsets.json
+├─ media/<video_id>/                  original.mp4 · proxy.mp4 · thumbnails.jpg · peaks.json · onsets.json
 └─ artifacts/<video_id>/<artifact>/   notes.json · score.musicxml · harmony.json · …
 ```
 
@@ -256,15 +258,16 @@ Measured with a built-in diagnostics overlay and treated as release criteria:
 | Timeline scrolling, zooming and scrubbing          | 60 fps                  |
 | Audible gap when a loop wraps around               | < 30 ms (aim: seamless) |
 
-Baseline measured on 25 November 2026, playing the original YouTube download (1080p60 H.264 with a keyframe every 5.07 s) in the app on the development laptop:
+Measured on 25 November 2026 in the app on the development laptop, with [the Monk video](https://www.youtube.com/watch?v=7A12z9S4F8U) (1080p60, 2:21): the original YouTube download, with a keyframe every 5.07 s, against the seek proxy the app makes, with a keyframe every 15 frames (0.25 s at 60 fps). The `bench` command of the run-segno skill takes the p95 of 10 jumps, 30 frame steps each way and 3 play starts. Each cell gives the range over three runs:
 
-| Interaction                       | Measured                    | Budget   |
-| --------------------------------- | --------------------------- | -------- |
-| Jump to a random point (10 jumps) | median 237 ms, worst 297 ms | < 100 ms |
-| One frame back / forward          | about 230 ms each way       | < 50 ms  |
-| First play after opening a video  | starts about 0.85 s late    | —        |
+| Interaction             | Original   | Seek proxy | Budget   |
+| ----------------------- | ---------- | ---------- | -------- |
+| Jump to a random point  | 253–260 ms | 29–35 ms   | < 100 ms |
+| One frame back          | 261–262 ms | 15–27 ms   | < 50 ms  |
+| One frame forward       | 262–263 ms | 16–26 ms   | < 50 ms  |
+| Play after a jump (max) | 279–344 ms | 64–74 ms   | —        |
 
-Every seek decodes again from the previous keyframe, even one frame forward. This is the evidence for the seek-optimised proxy (keyframe every ~0.5 s) below.
+Every seek decodes again from the keyframe before its target, even one frame forward. The cost therefore grows with the distance to that keyframe, at about 1.6 ms a frame. A proxy with a keyframe every 0.5 s (30 frames at 60 fps) measured 25–52 ms per frame step, too close to the budget. Hence the proxy below allows at most 15 frames between keyframes.
 
 #### Navigation units
 
@@ -334,9 +337,14 @@ A pianist's hands are on the keys:
 
 Done in the background after a download or import:
 
-- YouTube files have a keyframe only every few seconds, so jumping backwards or stepping frames means decoding seconds of video. The core creates a **seek-optimised proxy**: H.264 with a keyframe every ~0.5 s and no B-frames, encoded with the operating system's hardware encoder (Media Foundation or Quick Sync on Windows, VideoToolbox on macOS), which keeps ffmpeg within the LGPL. Playback uses the proxy; analysis uses the original.
-- **Thumbnail sprites** (one per second) for hover previews; when zoomed in, a hidden second video element shows the exact frame under the cursor.
-- **Waveform peaks** at several resolutions, **decoded audio** for audible scrubbing, and **attack detection** in Rust (spectral flux with rustfft) for stepping and snapping from day one.
+- YouTube files have a keyframe only every few seconds, so jumping backwards or stepping frames means decoding seconds of video. The core creates a **seek-optimised proxy**: H.264 with no B-frames and a keyframe at most every 15 frames and every 0.5 s, at most 1080p.
+  - It is encoded on the GPU: Quick Sync, or Media Foundation with any vendor's GPU, on Windows; VideoToolbox on macOS. Without a GPU encoder, OpenH264 encodes in software. All of these keep ffmpeg within the LGPL.
+  - For 1080p60 it takes about 0.32 MB per second of video, twice the YouTube download, with SSIM 0.997 against it. Quick Sync makes it at about 4× real time.
+  - The player switches to it as soon as it is ready, keeping the position, speed and play state. Playback uses the proxy; analysis uses the original.
+- **Thumbnail sprite** for hover previews: one JPEG with a 160-pixel-wide tile per second, taken from the proxy's keyframes in about half a second. When zoomed in, a hidden second video element shows the exact frame under the cursor.
+- **Waveform peaks**: the minimum and maximum of every 10 ms of mono audio, with coarser levels derived in the UI.
+- Planned: **decoded audio** for audible scrubbing, and **attack detection** in Rust (spectral flux with rustfft) for stepping and snapping from day one.
+- Preparation runs one video at a time, reports its progress in the library and the player, and resumes after a restart. A failure is shown on the video, which still plays from the original.
 
 #### Playback engine
 
@@ -499,8 +507,8 @@ Each phase ends with something usable and a verifiable exit criterion.
 
 **Phase 1A: Base app (features 1–4), navigation first**
 
-1. Local file import and media preparation: seek proxy, thumbnails, waveform peaks and attacks. _(Import done: ffprobe, hard link or copy into the library, media served with Range requests. Media preparation next.)_
-2. The player with the full navigation layer: two-level timeline, shortcuts, frame and attack stepping, tap-tempo grid, go-to, navigation history, return to start, replay and speed. _(First version done: play/pause, ±2 s, ±10 s, frame steps, start/end, speed, replay. The rest after the proxy.)_
+1. Local file import and media preparation: seek proxy, thumbnails, waveform peaks and attacks. _(Done except attacks, which come with the timeline. Import: ffprobe, hard link or copy into the library, media served with Range requests. Preparation runs in the background with progress and makes the seek proxy, the thumbnail sprite and the waveform peaks. Jumps and frame steps are within the budget; see 4.2.)_
+2. The player with the full navigation layer: two-level timeline, shortcuts, frame and attack stepping, tap-tempo grid, go-to, navigation history, return to start, replay and speed. _(First version done: play/pause, ±2 s, ±10 s, frame steps, start/end, speed, replay, and the switch to the proxy once it is ready. Next: the two-level timeline with the waveform and hover thumbnails.)_
 3. Markers, sections, A-B loops, pre-roll, count-in and speed trainer.
 4. Comments anchored to time.
 5. YouTube downloads, chapters as markers, and the library (search, tags, remembered state).
@@ -553,7 +561,7 @@ Each phase ends with something usable and a verifiable exit criterion.
 | Risk                                                                                                    | Mitigation                                                                                                                        |
 | ------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | YouTube changes and breaks downloads                                                                    | yt-dlp with automatic updates; importing local files always works                                                                 |
-| Jumps and frame stepping feel slow on YouTube files (sparse keyframes)                                  | Seek-optimised proxy, measured against the navigation budget                                                                      |
+| Jumps and frame stepping feel slow on YouTube files (sparse keyframes)                                  | Seek-optimised proxy: within the navigation budget on the development laptop (4.2); the `bench` command checks it                 |
 | Loop gaps or poor sound at slow speeds                                                                  | Playback engine v2 (Web Audio + time-stretching)                                                                                  |
 | Shortcuts clash with the webview or with typing                                                         | Central command registry, WebView2 default shortcuts disabled, clear focus rules (`Esc` returns to the player)                    |
 | Wide visual variety (Synthesia, renders with effects, filmed pianos, partial keyboards, overlaid logos) | Manual calibration as a fallback, style profiles, a varied synthetic set and audio as a fallback                                  |
@@ -589,7 +597,7 @@ Without an NVIDIA GPU, everything is designed to run well on the CPU, with optio
 | App                            | Tauri 2 + React/TypeScript                                                     | Electron; web SaaS; PySide6            | Light, secure, cross-platform, mobile possible, UI reusable on the web                             |
 | Local backend                  | Rust core + Python engine                                                      | Everything in Python (FastAPI)         | Instant start-up, features 1–4 without Python, engine on demand, scalable workers                  |
 | UI ↔ core                      | HTTP + WebSocket on localhost with a token                                     | Tauri IPC (commands)                   | The same API will serve the web version; the local port is protected with a token and a Host check |
-| Playback media                 | Seek-optimised proxy (short GOP, OS encoder)                                   | Playing the downloaded file directly   | Instant jumps and frame stepping; keeps ffmpeg within the LGPL                                     |
+| Playback media                 | Seek-optimised proxy (keyframe ≤ 15 frames apart, GPU encoder or OpenH264)     | Playing the downloaded file directly   | Jumps and frame steps about 10× faster (measured, 4.2); keeps ffmpeg within the LGPL               |
 | Playback engine                | Native `<video>` first; Web Audio + time-stretching if measurements require it | Web Audio from day one                 | Start simple, upgrade on evidence                                                                  |
 | Beat grid before transcription | Tap tempo                                                                      | Wait until Phase 2                     | Musical navigation from the first version                                                          |
 | Transcription                  | Hybrid vision + audio                                                          | Vision only; audio only                | Precision and hands from vision, plus dynamics, pedal and fallback from audio                      |

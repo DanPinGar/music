@@ -35,6 +35,11 @@
     "position": "Position",
     "speed": "Speed"
   },
+  "preparation": {
+    "queued": "Waiting to prepare instant navigation…",
+    "running": "Preparing instant navigation… {{percent}} %",
+    "failed": "Instant navigation unavailable: hover for details"
+  },
   "palette": {
     "title": "Command palette",
     "description": "Search for a command to run",

@@ -1,7 +1,10 @@
-//! Media adapters: locating ffmpeg and ffprobe and reading media files with them.
+//! Media adapters: locating ffmpeg and ffprobe, reading media files with them and preparing
+//! videos for instant navigation.
 
+mod prepare;
 mod probe;
 mod tools;
 
+pub use prepare::FfmpegPreparer;
 pub use probe::FfprobeProbe;
 pub use tools::{MediaTools, dev_tools_dir};

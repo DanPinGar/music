@@ -35,6 +35,11 @@
     "position": "Posición",
     "speed": "Velocidad"
   },
+  "preparation": {
+    "queued": "En cola para preparar la navegación instantánea…",
+    "running": "Preparando la navegación instantánea… {{percent}} %",
+    "failed": "Navegación instantánea no disponible: pasa el ratón para ver el motivo"
+  },
   "palette": {
     "title": "Paleta de comandos",
     "description": "Busca un comando para ejecutarlo",

@@ -107,7 +107,7 @@
         "tags": [
           "videos"
         ],
-        "summary": "Imports a video file from this computer into the library, ready to play.",
+        "summary": "Imports a video file from this computer into the library, ready to play, and queues its\npreparation for instant navigation.",
         "operationId": "import_video",
         "requestBody": {
           "content": {
@@ -231,7 +231,7 @@
         "tags": [
           "videos"
         ],
-        "summary": "The video's media file, for the player. Supports `Range` requests, so jumps load only what\nthey need. Media elements cannot send headers: pass the token as the `token` query parameter.",
+        "summary": "The video for the player: the copy made for instant seeking once it exists, the original\nuntil then. Supports `Range` requests. Media elements cannot send headers: pass the token\nas the `token` query parameter.",
         "operationId": "get_media",
         "parameters": [
           {
@@ -264,6 +264,108 @@
           },
           "404": {
             "description": "No such video, or it has no media yet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "token": []
+          }
+        ]
+      }
+    },
+    "/videos/{id}/peaks": {
+      "get": {
+        "tags": [
+          "videos"
+        ],
+        "summary": "The audio waveform: `{\"version\": 1, \"peaks_per_second\": 100, \"peaks\": [min, max, …]}` with\nvalues from -127 to 127.",
+        "operationId": "get_peaks",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Video id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The waveform peaks, as JSON"
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such video, or no waveform yet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "token": []
+          }
+        ]
+      }
+    },
+    "/videos/{id}/thumbnails": {
+      "get": {
+        "tags": [
+          "videos"
+        ],
+        "summary": "The thumbnail sprite (JPEG); its layout is in the video's `thumbnails`.",
+        "operationId": "get_thumbnails",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Video id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The sprite, as a JPEG image"
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such video, or no thumbnails yet",
             "content": {
               "application/json": {
                 "schema": {
@@ -315,6 +417,33 @@
             "description": "Title in the library; the file name when omitted."
           }
         }
+      },
+      "PreparationDto": {
+        "type": "object",
+        "description": "Progress of preparing a video for navigation.",
+        "required": [
+          "stage",
+          "progress"
+        ],
+        "properties": {
+          "progress": {
+            "type": "number",
+            "format": "double",
+            "description": "The whole preparation, from 0 to 1."
+          },
+          "stage": {
+            "$ref": "#/components/schemas/PreparationStageDto"
+          }
+        }
+      },
+      "PreparationStageDto": {
+        "type": "string",
+        "enum": [
+          "queued",
+          "seek_proxy",
+          "thumbnails",
+          "peaks"
+        ]
       },
       "Problem": {
         "type": "object",
@@ -386,6 +515,50 @@
           }
         }
       },
+      "ThumbnailsDto": {
+        "type": "object",
+        "description": "Layout of the thumbnail sprite: tile `n` shows the video at `n * interval_ms`, at column\n`n % columns` and row `n / columns`.",
+        "required": [
+          "columns",
+          "rows",
+          "tile_width",
+          "tile_height",
+          "interval_ms",
+          "count"
+        ],
+        "properties": {
+          "columns": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "count": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "interval_ms": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "rows": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "tile_height": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "tile_width": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
       "VideoDto": {
         "type": "object",
         "description": "A video in the library.",
@@ -394,6 +567,8 @@
           "source",
           "title",
           "status",
+          "seek_proxy",
+          "has_peaks",
           "created_at",
           "updated_at"
         ],
@@ -422,6 +597,10 @@
             ],
             "format": "double"
           },
+          "has_peaks": {
+            "type": "boolean",
+            "description": "Whether `/peaks` serves the audio waveform."
+          },
           "height": {
             "type": [
               "integer",
@@ -433,6 +612,28 @@
           "id": {
             "type": "string",
             "format": "uuid"
+          },
+          "preparation": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PreparationDto",
+                "description": "Present while the video is being prepared for navigation."
+              }
+            ]
+          },
+          "preparation_error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the preparation failed, if it did."
+          },
+          "seek_proxy": {
+            "type": "boolean",
+            "description": "Whether `/media` already serves the copy made for instant seeking."
           },
           "source": {
             "$ref": "#/components/schemas/VideoSourceDto"
@@ -446,6 +647,17 @@
           },
           "status": {
             "$ref": "#/components/schemas/VideoStatusDto"
+          },
+          "thumbnails": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ThumbnailsDto",
+                "description": "Thumbnail sprite served at `/thumbnails`, once made."
+              }
+            ]
           },
           "title": {
             "type": "string"

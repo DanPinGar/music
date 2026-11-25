@@ -10,7 +10,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatDuration } from "@/lib/format";
+import { PreparationStatus } from "./preparation-status";
 import { useImportVideos } from "./use-import-videos";
+import { VideoThumbnail } from "./video-thumbnail";
 
 /** Start screen: the videos downloaded or imported so far. */
 export function LibraryPage() {
@@ -20,6 +22,9 @@ export function LibraryPage() {
   const videos = useQuery({
     queryKey: ["videos"],
     queryFn: async () => expectData(await api.GET("/videos")),
+    // Follow preparations while any is running.
+    refetchInterval: (query) =>
+      query.state.data?.some((video) => video.preparation) ? 1_000 : false,
   });
 
   return (
@@ -92,8 +97,9 @@ function VideoGrid({ videos }: { videos: Video[] }) {
             params={{ videoId: video.id }}
             className="block rounded-xl outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
           >
-            <Card className="h-full transition-colors hover:bg-muted/40">
-              <CardHeader>
+            <Card className="h-full gap-0 overflow-hidden pt-0 transition-colors hover:bg-muted/40">
+              <VideoThumbnail video={video} />
+              <CardHeader className="pt-4">
                 <CardTitle className="line-clamp-2">{video.title}</CardTitle>
                 <CardDescription className="flex flex-wrap items-center gap-2">
                   <Badge variant={video.status === "failed" ? "destructive" : "secondary"}>
@@ -103,6 +109,7 @@ function VideoGrid({ videos }: { videos: Video[] }) {
                   {technicalLine(video) && <span>{technicalLine(video)}</span>}
                   {video.channel && <span className="truncate">{video.channel}</span>}
                 </CardDescription>
+                <PreparationStatus video={video} className="pt-1" />
               </CardHeader>
             </Card>
           </Link>

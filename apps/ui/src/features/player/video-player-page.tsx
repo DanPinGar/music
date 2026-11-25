@@ -8,9 +8,11 @@ import { useSystemInfo } from "@/api/use-system-info";
 import { useCommandRegistry, useCommands } from "@/commands/commands-context";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { PreparationStatus } from "@/features/library/preparation-status";
 import { forgetLastVideo, rememberLastVideo } from "./last-video";
 import { playerCommands } from "./player-commands";
 import { PlayerControls } from "./player-controls";
+import { useSeamlessSource } from "./use-seamless-source";
 
 /** The study player for one video. */
 export function VideoPlayerPage({ videoId }: { videoId: string }) {
@@ -23,7 +25,15 @@ export function VideoPlayerPage({ videoId }: { videoId: string }) {
     queryKey: ["videos", videoId],
     queryFn: async () =>
       expectData(await api.GET("/videos/{id}", { params: { path: { id: videoId } } })),
+    // Follow the preparation; when the seek proxy is ready the player switches to it.
+    refetchInterval: (query) => (query.state.data?.preparation ? 1_000 : false),
   });
+  // The query parameter only makes the URL change when the API starts serving the proxy.
+  const proxyReady = video.data?.seek_proxy === true;
+  const media = useSeamlessSource(
+    videoRef,
+    `${mediaUrl(config, videoId)}${proxyReady ? "&copy=seek-proxy" : ""}`,
+  );
 
   const library = useSystemInfo().data?.library_id;
 
@@ -60,19 +70,21 @@ export function VideoPlayerPage({ videoId }: { videoId: string }) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex shrink-0 items-baseline gap-3 border-b px-4 py-2">
+      <div className="flex shrink-0 items-center gap-3 border-b px-4 py-2">
         <h1 className="truncate font-heading text-base font-semibold">{video.data.title}</h1>
         {video.data.width && video.data.height && (
           <span className="shrink-0 text-xs text-muted-foreground">
             {video.data.width}×{video.data.height} · {Math.round(fps * 100) / 100} fps
           </span>
         )}
+        <PreparationStatus video={video.data} className="ml-auto w-64 shrink-0" />
       </div>
       <div className="relative min-h-0 flex-1 bg-black">
         {/* biome-ignore lint/a11y/useMediaCaption: piano videos carry no speech to caption. */}
         <video
           ref={videoRef}
-          src={mediaUrl(config, videoId)}
+          src={media.src}
+          onLoadedMetadata={media.onLoadedMetadata}
           preload="auto"
           playsInline
           className="absolute inset-0 size-full object-contain"
