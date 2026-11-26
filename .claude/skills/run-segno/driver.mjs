@@ -892,10 +892,17 @@ async function smoke() {
 
     // Timeline gestures: Shift + drag, edges that snap (Alt: free), double-click.
     await app.keyboard.press("Shift+R"); // no loop
+    // No beat grid either: its tapped beats would compete with the attacks for snapping.
+    await app.keyboard.press("Control+k");
+    await app.waitForSelector("[cmdk-input]:focus", { timeout: 3_000 });
+    await app.keyboard.type("grid.clear", { delay: 10 });
+    await app.keyboard.press("Enter");
+    await app.waitForSelector("[data-slot=dialog-content]", { state: "detached", timeout: 3_000 });
     await app.keyboard.press("Control+0");
     await sleep(150);
     const loopAttr = () => detail.getAttribute("data-loop");
-    await COMMANDS.drag("[data-testid=timeline-detail] 0.19 0.41 Shift");
+    // From 0.975 s, 15 ms before an attack: within snapping reach (8 px) at any timeline width.
+    await COMMANDS.drag("[data-testid=timeline-detail] 0.195 0.41 Shift");
     const drawn2 = await loopAttr();
     await COMMANDS.drag("[data-testid=timeline-detail] 0.41 0.495");
     const snapped = await loopAttr();
@@ -934,6 +941,53 @@ async function smoke() {
       Math.abs(returned - 3) < 0.01,
       `t = ${returned.toFixed(3)}`,
     );
+
+    // Comments: C at the playhead, Markdown, a time that jumps, the keys back after saving.
+    await app.keyboard.press("Shift+R");
+    await seekTo(2);
+    await sleep(200);
+    await app.keyboard.press("C");
+    const composing = await app
+      .waitForSelector("[data-testid=comment-composer] textarea:focus", { timeout: 3_000 })
+      .then(
+        () => true,
+        () => false,
+      );
+    await app.keyboard.type("Pedal **aquí**; repite desde 0:01.5", { delay: 10 });
+    await app.keyboard.press("Control+Enter");
+    await app
+      .waitForSelector("[data-testid=comment-row] strong", { timeout: 5_000 })
+      .catch(() => {});
+    await app.keyboard.press("Home");
+    await sleep(200);
+    const keysBack = (await timeNow()) < 0.01;
+    const row = app.locator("[data-testid=comment-row]").first();
+    const bold = await row
+      .locator("strong")
+      .innerText()
+      .catch(() => "");
+    await row
+      .locator("[data-testid=comment-time]")
+      .click()
+      .catch(() => {});
+    await sleep(250);
+    const jumped = await timeNow();
+    check(
+      '"C" writes a Markdown comment whose times jump there; saving gives the keys back',
+      composing && bold === "aquí" && Math.abs(jumped - 1.5) < 0.01 && keysBack,
+      `bold "${bold}", t = ${jumped.toFixed(3)}, keys back: ${keysBack}`,
+    );
+
+    await app.keyboard.press("Control+0");
+    await sleep(150);
+    await COMMANDS.move("[data-testid=timeline-detail] 0.5 0.7"); // 2.5 s
+    const said = await app
+      .waitForSelector("[data-testid=timeline-preview-comment]", { timeout: 3_000 })
+      .then((handle) => handle.innerText())
+      .catch(() => "");
+    check("hovering the timeline shows the comment there", said.includes("Pedal aquí"), said);
+    await COMMANDS.ss("smoke-6-comments");
+    await app.mouse.move(0, 0);
   }
   check(
     "no console errors, warnings or failed requests",

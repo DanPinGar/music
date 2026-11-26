@@ -43,7 +43,7 @@ node .claude/skills/run-segno/driver.mjs --smoke        # dev mode: Vite + cargo
 node .claude/skills/run-segno/driver.mjs --smoke prod   # built app: real CSP and origin, ~25 s
 ```
 
-It prints `PASS`/`FAIL` for 36 checks:
+It prints `PASS`/`FAIL` for 38 checks:
 
 - the status bar fed by the API, the `Ctrl+K` palette running a command, the `?` dialog,
   `Ctrl+2`/`Ctrl+1` and the language toggle;
@@ -66,6 +66,8 @@ It prints `PASS`/`FAIL` for 36 checks:
   - after a reload the video reopens with its loop, grid and markers;
 - timeline gestures: Shift + drag makes a loop whose edges drag and snap to the attacks (`Alt`:
   free), a double-click adds a marker, and return-on-pause goes back to where playback started;
+- comments: `C` writes one in Markdown at the playhead, `Ctrl+Enter` saves it and gives the keys
+  back, a time written in it jumps there, and the hover preview shows it;
 - no console errors or HTTP errors.
 
 The timeline's detail canvas exposes its state for tests: `data-start`, `data-span`,
@@ -171,8 +173,8 @@ pnpm dev   # builds and opens the window with hot reload; closing the window sto
 pnpm check
 ```
 
-Biome, both type checks, Vitest (102 tests), the UI build, rustfmt, clippy with warnings as
-errors, cargo test (84 tests, including real ffmpeg runs), Ruff, Pyright in strict mode and
+Biome, both type checks, Vitest (108 tests), the UI build, rustfmt, clippy with warnings as
+errors, cargo test (89 tests, including real ffmpeg runs), Ruff, Pyright in strict mode and
 pytest (7 tests). All pass. Set `SEGNO_REQUIRE_FFMPEG=1` to make the ffmpeg tests fail, instead
 of skipping, when `.tools/ffmpeg` is missing (CI does).
 
@@ -210,8 +212,15 @@ of skipping, when `.tools/ffmpeg` is missing (CI does).
 - **Zoom and follow mode outlive the test library.** The timeline keeps them in `localStorage`
   (`segno.timeline`), which `launch` does not wipe, so a new session may open zoomed in. Press
   `Control+0` first when a check depends on the zoom. Each smoke run zoomed in a little more
-  until a zoom check failed at the 0.5 s minimum. The markers panel (`segno.player.markersPanel`)
-  and return-on-pause (`segno.player`) persist the same way.
+  until a zoom check failed at the 0.5 s minimum. The side panel (`segno.player.panel`) and
+  return-on-pause (`segno.player`) persist the same way. Dev (`localhost:5173`) and prod
+  (`tauri.localhost`) are different origins with separate storage. A check passing in one mode
+  and failing in the other can come down to this, for example a panel open in one and closed in
+  the other.
+- **The timeline's width changes what snaps.** Snapping reaches 8 px. The window is 1280 CSS px
+  (screenshots are 1600 px at 125 % scaling), and the side panel takes 320 px. So the same drag
+  reaches 0.042 s with the panel open and 0.031 s without, on a 5 s view. Place test drags well
+  inside that reach (the smoke test presses 15 ms from an attack).
 - **Shortcuts are ignored while a dialog is open, opening or closing.** Keys pressed then belong
   to the dialog. A second `G` pressed while the first go-to dialog was still closing once
   swallowed every key that followed, failing six checks at random. Wait for

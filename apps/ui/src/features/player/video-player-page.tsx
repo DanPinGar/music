@@ -1,7 +1,7 @@
 import { expectData, mediaUrl, type Video } from "@segno/api-client";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { ListIcon } from "lucide-react";
+import { ListIcon, MessageSquareTextIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -12,22 +12,24 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { PreparationStatus } from "@/features/library/preparation-status";
 import { cn } from "@/lib/utils";
+import type { CommentDraft } from "./comments-panel";
 import { GoToDialog } from "./go-to-dialog";
 import { forgetLastVideo, rememberLastVideo } from "./last-video";
-import { MarkersPanel } from "./markers-panel";
 import { type PlayerUi, playerCommands } from "./player-commands";
 import { PlayerControls } from "./player-controls";
 import { PlayerRuntime } from "./player-runtime";
 import { createSession } from "./session";
 import { type StudyUi, studyCommands } from "./study-commands";
+import { type PanelTab, StudyPanel } from "./study-panel";
 import { Timeline } from "./timeline/timeline";
 import { TimelineController } from "./timeline/timeline-controller";
+import { useComments } from "./use-comments";
 import { type MarkerActions, useMarkers } from "./use-markers";
 import { useAttacks, useWaveform } from "./use-navigation-data";
 import { useSeamlessSource } from "./use-seamless-source";
 import { useVideoState } from "./use-video-state";
 
-const PANEL_KEY = "segno.player.markersPanel";
+const PANEL_KEY = "segno.player.panel";
 
 /** The study player for one video: loads it, then hands over to the player itself. */
 export function VideoPlayerPage({ videoId }: { videoId: string }) {
@@ -90,8 +92,14 @@ function StudyPlayer({ video }: { video: Video }) {
   const attacks = useAttacks(video);
   const markers = useMarkers(video.id);
   const markersRef = useRef<MarkerActions>(markers);
+  const comments = useComments(video.id);
   const [goToOpen, setGoToOpen] = useState(false);
-  const [panelOpen, setPanelOpen] = useState(loadPanelOpen);
+  const [panel, setPanel] = useState(loadPanel);
+  const [draft, setDraft] = useState<CommentDraft | null>(null);
+  const togglePanel = (tab: PanelTab) =>
+    setPanel((current) =>
+      current.open && current.tab === tab ? { ...current, open: false } : { open: true, tab },
+    );
 
   const fps = video.fps ?? 30;
   const duration = (video.duration_ms ?? 0) / 1000;
@@ -102,6 +110,7 @@ function StudyPlayer({ video }: { video: Video }) {
     runtime.setMarkers(markers.items);
     timeline.setMarkers(markers.items);
   }, [runtime, timeline, markers]);
+  useEffect(() => timeline.setComments(comments.items), [timeline, comments.items]);
   useEffect(() => runtime.start(), [runtime]);
   useEffect(() => {
     const show = () => {
@@ -116,16 +125,26 @@ function StudyPlayer({ video }: { video: Video }) {
 
   useEffect(() => {
     try {
-      localStorage.setItem(PANEL_KEY, JSON.stringify(panelOpen));
+      localStorage.setItem(PANEL_KEY, JSON.stringify(panel));
     } catch {
       // Storage unavailable: the panel opens closed next time.
     }
-  }, [panelOpen]);
+  }, [panel]);
 
   const ui = useMemo<PlayerUi & StudyUi>(
     () => ({
       openGoTo: () => setGoToOpen(true),
-      toggleMarkersPanel: () => setPanelOpen((open) => !open),
+      toggleMarkersPanel: () =>
+        setPanel((current) =>
+          current.open && current.tab === "markers"
+            ? { ...current, open: false }
+            : { open: true, tab: "markers" },
+        ),
+      showComments: () => setPanel({ open: true, tab: "comments" }),
+      addComment: () => {
+        setPanel({ open: true, tab: "comments" });
+        setDraft({ id: null, start: runtime.time(), end: null, body: "" });
+      },
       addMarker: (kind, start, end, color) =>
         markersRef.current.add({
           kind,
@@ -136,7 +155,7 @@ function StudyPlayer({ video }: { video: Video }) {
         }),
       explain: (message) => toast(t(`loop.${message}`)),
     }),
-    [t],
+    [t, runtime],
   );
   useEffect(() => {
     timeline.setHandlers({
@@ -172,21 +191,36 @@ function StudyPlayer({ video }: { video: Video }) {
           </span>
         )}
         <PreparationStatus video={video} className="ml-auto w-64 shrink-0" />
-        <Button
-          variant="ghost"
-          size="sm"
-          className={cn("shrink-0", !video.preparation && "ml-auto", panelOpen && "bg-muted")}
-          aria-pressed={panelOpen}
-          onClick={(event) => {
-            event.currentTarget.blur();
-            setPanelOpen((open) => !open);
-          }}
-          data-testid="markers-toggle"
-        >
-          <ListIcon />
-          {t("markers.title")}
-          <span className="text-muted-foreground">{markers.items.length}</span>
-        </Button>
+        {(
+          [
+            ["markers", ListIcon, t("markers.title"), markers.items.length],
+            ["comments", MessageSquareTextIcon, t("comments.title"), comments.items.length],
+          ] as const
+        ).map(([tab, Icon, label, count], index) => {
+          const active = panel.open && panel.tab === tab;
+          return (
+            <Button
+              key={tab}
+              variant="ghost"
+              size="sm"
+              className={cn(
+                "shrink-0",
+                index === 0 && !video.preparation && "ml-auto",
+                active && "bg-muted",
+              )}
+              aria-pressed={active}
+              onClick={(event) => {
+                event.currentTarget.blur();
+                togglePanel(tab);
+              }}
+              data-testid={`${tab}-toggle`}
+            >
+              <Icon />
+              {label}
+              <span className="text-muted-foreground">{count}</span>
+            </Button>
+          );
+        })}
       </div>
       <div className="flex min-h-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col">
@@ -210,6 +244,7 @@ function StudyPlayer({ video }: { video: Video }) {
             timeline={timeline}
             waveform={waveform}
             attacks={attacks}
+            comments={comments.items}
           />
           <PlayerControls
             videoRef={videoRef}
@@ -218,8 +253,17 @@ function StudyPlayer({ video }: { video: Video }) {
             markers={markers.items}
           />
         </div>
-        {panelOpen && (
-          <MarkersPanel runtime={runtime} markers={markers} onClose={() => setPanelOpen(false)} />
+        {panel.open && (
+          <StudyPanel
+            tab={panel.tab}
+            onTabChange={(tab) => setPanel({ open: true, tab })}
+            onClose={() => setPanel((current) => ({ ...current, open: false }))}
+            runtime={runtime}
+            markers={markers}
+            comments={comments}
+            draft={draft}
+            onDraftChange={setDraft}
+          />
         )}
       </div>
       <GoToDialog
@@ -227,15 +271,23 @@ function StudyPlayer({ video }: { video: Video }) {
         onOpenChange={setGoToOpen}
         runtime={runtime}
         markers={markers.items}
+        comments={comments.items}
       />
     </div>
   );
 }
 
-function loadPanelOpen(): boolean {
+function loadPanel(): { open: boolean; tab: PanelTab } {
   try {
-    return JSON.parse(localStorage.getItem(PANEL_KEY) ?? "false") === true;
+    const stored: unknown = JSON.parse(localStorage.getItem(PANEL_KEY) ?? "null");
+    if (typeof stored === "object" && stored !== null && "open" in stored && "tab" in stored) {
+      return {
+        open: stored.open === true,
+        tab: stored.tab === "comments" ? "comments" : "markers",
+      };
+    }
   } catch {
-    return false;
+    // Unreadable: start closed.
   }
+  return { open: false, tab: "markers" };
 }

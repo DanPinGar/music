@@ -11,8 +11,8 @@ use axum::http::header::{AUTHORIZATION, CONTENT_RANGE, CONTENT_TYPE, HOST, RANGE
 use axum::http::{HeaderMap, Request, StatusCode};
 use segno_api::{AppState, Preparations, SecurityConfig, SystemInfo};
 use segno_domain::{
-    MarkerRepository, MediaInfo, MediaPreparer, MediaProbe, MediaStore, PreparationInput,
-    ThumbnailSprite, Video, VideoRepository, VideoSource, VideoStateRepository,
+    CommentRepository, MarkerRepository, MediaInfo, MediaPreparer, MediaProbe, MediaStore,
+    PreparationInput, ThumbnailSprite, Video, VideoRepository, VideoSource, VideoStateRepository,
 };
 use segno_storage::{LibraryFiles, SqliteStore};
 use serde_json::{Value, json};
@@ -106,6 +106,7 @@ async fn harness_with(probe: Option<Arc<dyn MediaProbe>>, prepare: bool) -> Harn
         videos,
         states: Arc::new(store.clone()) as Arc<dyn VideoStateRepository>,
         markers: Arc::new(store.clone()) as Arc<dyn MarkerRepository>,
+        comments: Arc::new(store.clone()) as Arc<dyn CommentRepository>,
         media_files,
         probe,
         preparations,
@@ -518,6 +519,70 @@ async fn invalid_markers_are_400_problems() {
     }
 }
 
+#[tokio::test]
+async fn comments_are_written_rewritten_and_deleted() {
+    let h = harness().await;
+    let video = stored_video(&h).await;
+    let comments = format!("/videos/{}/comments", video.id);
+
+    let (status, _, moment) = send(
+        &h.app,
+        json_request(
+            "POST",
+            &comments,
+            json!({ "start_ms": 83_500, "body": "  Pedal **here**, see 1:12  " }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{moment}");
+    assert_eq!(moment["body"], "Pedal **here**, see 1:12");
+    let (status, _, stretch) = send(
+        &h.app,
+        json_request(
+            "POST",
+            &comments,
+            json!({ "start_ms": 10_000, "end_ms": 20_000, "body": "Left hand alone" }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    let (_, _, listed) = send(&h.app, empty(authorized(get(&comments)))).await;
+    let starts: Vec<i64> = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["start_ms"].as_i64().unwrap())
+        .collect();
+    assert_eq!(starts, [10_000, 83_500]);
+
+    let one = format!("{comments}/{}", stretch["id"].as_str().unwrap());
+    let (status, _, changed) = send(
+        &h.app,
+        json_request(
+            "PUT",
+            &one,
+            json!({ "start_ms": 12_000, "body": "Both hands" }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{changed}");
+    assert!(changed["end_ms"].is_null());
+
+    let (status, _, problem) = send(
+        &h.app,
+        json_request("PUT", &one, json!({ "start_ms": 12_000, "body": "   " })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
+
+    let delete = authorized(Request::delete(&one).header(HOST, format!("127.0.0.1:{PORT}")));
+    let (status, _, _) = raw(&h.app, empty(delete)).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, _, listed) = send(&h.app, empty(authorized(get(&comments)))).await;
+    assert_eq!(listed.as_array().unwrap().len(), 1);
+}
+
 #[test]
 fn the_openapi_document_describes_every_route() {
     let doc = serde_json::to_value(segno_api::openapi()).unwrap();
@@ -535,6 +600,8 @@ fn the_openapi_document_describes_every_route() {
         "/videos/{id}/state",
         "/videos/{id}/markers",
         "/videos/{id}/markers/{marker_id}",
+        "/videos/{id}/comments",
+        "/videos/{id}/comments/{comment_id}",
     ] {
         assert!(paths.contains_key(path), "missing {path}");
     }

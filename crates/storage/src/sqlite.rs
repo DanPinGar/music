@@ -5,8 +5,8 @@ use std::time::Duration;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use segno_domain::{
-    DomainError, Marker, MarkerId, MarkerRepository, Result, Video, VideoId, VideoRepository,
-    VideoState, VideoStateRepository,
+    Comment, CommentId, CommentRepository, DomainError, Marker, MarkerId, MarkerRepository, Result,
+    Video, VideoId, VideoRepository, VideoState, VideoStateRepository,
 };
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::{FromRow, SqlitePool};
@@ -387,6 +387,134 @@ impl MarkerRepository for SqliteStore {
     }
 }
 
+macro_rules! comment_columns {
+    () => {
+        "id, video_id, start_ms, end_ms, body, created_at, updated_at"
+    };
+}
+
+#[derive(FromRow)]
+struct CommentRow {
+    id: String,
+    video_id: String,
+    start_ms: i64,
+    end_ms: Option<i64>,
+    body: String,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+}
+
+impl TryFrom<CommentRow> for Comment {
+    type Error = DomainError;
+
+    fn try_from(row: CommentRow) -> Result<Self> {
+        Ok(Self {
+            id: row.id.parse()?,
+            video: row.video_id.parse()?,
+            start_ms: row.start_ms,
+            end_ms: row.end_ms,
+            body: row.body,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        })
+    }
+}
+
+fn comment_not_found(id: CommentId) -> DomainError {
+    DomainError::NotFound {
+        entity: "comment",
+        id: id.to_string(),
+    }
+}
+
+#[async_trait]
+impl CommentRepository for SqliteStore {
+    async fn list_comments(&self, video: VideoId) -> Result<Vec<Comment>> {
+        let rows: Vec<CommentRow> = sqlx::query_as(concat!(
+            "SELECT ",
+            comment_columns!(),
+            " FROM comments WHERE video_id = ? AND deleted_at IS NULL ORDER BY start_ms, id"
+        ))
+        .bind(video.to_string())
+        .fetch_all(&self.pool)
+        .await
+        .map_err(DomainError::storage)?;
+        rows.into_iter().map(Comment::try_from).collect()
+    }
+
+    async fn get_comment(&self, video: VideoId, id: CommentId) -> Result<Comment> {
+        let row: Option<CommentRow> = sqlx::query_as(concat!(
+            "SELECT ",
+            comment_columns!(),
+            " FROM comments WHERE id = ? AND video_id = ? AND deleted_at IS NULL"
+        ))
+        .bind(id.to_string())
+        .bind(video.to_string())
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(DomainError::storage)?;
+        row.ok_or_else(|| comment_not_found(id))?.try_into()
+    }
+
+    async fn insert_comment(&self, comment: &Comment) -> Result<()> {
+        sqlx::query(concat!(
+            "INSERT INTO comments (",
+            comment_columns!(),
+            ") VALUES (?, ?, ?, ?, ?, ?, ?)"
+        ))
+        .bind(comment.id.to_string())
+        .bind(comment.video.to_string())
+        .bind(comment.start_ms)
+        .bind(comment.end_ms)
+        .bind(&comment.body)
+        .bind(comment.created_at)
+        .bind(comment.updated_at)
+        .execute(&self.pool)
+        .await
+        .map_err(DomainError::storage)?;
+        Ok(())
+    }
+
+    async fn update_comment(&self, comment: &Comment) -> Result<()> {
+        let result = sqlx::query(
+            "UPDATE comments SET start_ms = ?, end_ms = ?, body = ?, updated_at = ? \
+             WHERE id = ? AND video_id = ? AND deleted_at IS NULL",
+        )
+        .bind(comment.start_ms)
+        .bind(comment.end_ms)
+        .bind(&comment.body)
+        .bind(comment.updated_at)
+        .bind(comment.id.to_string())
+        .bind(comment.video.to_string())
+        .execute(&self.pool)
+        .await
+        .map_err(DomainError::storage)?;
+        if result.rows_affected() == 0 {
+            return Err(comment_not_found(comment.id));
+        }
+        Ok(())
+    }
+
+    async fn delete_comment(&self, video: VideoId, id: CommentId) -> Result<()> {
+        let now = Utc::now();
+        let result = sqlx::query(
+            "UPDATE comments SET deleted_at = ?, updated_at = ? \
+             WHERE id = ? AND video_id = ? AND deleted_at IS NULL",
+        )
+        .bind(now)
+        .bind(now)
+        .bind(id.to_string())
+        .bind(video.to_string())
+        .execute(&self.pool)
+        .await
+        .map_err(DomainError::storage)?;
+        if result.rows_affected() == 0 {
+            return Err(comment_not_found(id));
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use segno_domain::{
@@ -589,6 +717,51 @@ mod tests {
             store.delete_marker(video.id, late.id).await,
             Err(DomainError::NotFound { .. })
         ));
+    }
+
+    #[tokio::test]
+    async fn comments_are_listed_in_time_order_until_deleted() {
+        let store = SqliteStore::in_memory().await.unwrap();
+        let video = sample("Commented");
+        store.insert(&video).await.unwrap();
+        let comment = |start_ms, end_ms, body: &str| {
+            Comment::new(
+                video.id,
+                segno_domain::CommentFields {
+                    start_ms,
+                    end_ms,
+                    body: body.into(),
+                },
+            )
+            .unwrap()
+        };
+        let late = comment(50_000, None, "Fingering: 1-3-5");
+        let mut range = comment(10_000, Some(20_000), "Pedal through the bridge");
+        store.insert_comment(&late).await.unwrap();
+        store.insert_comment(&range).await.unwrap();
+
+        let bodies: Vec<String> = store
+            .list_comments(video.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|c| c.body)
+            .collect();
+        assert_eq!(bodies, ["Pedal through the bridge", "Fingering: 1-3-5"]);
+
+        range
+            .change(segno_domain::CommentFields {
+                start_ms: 11_000,
+                end_ms: None,
+                body: "**Pedal** here".into(),
+            })
+            .unwrap();
+        store.update_comment(&range).await.unwrap();
+        assert_eq!(store.get_comment(video.id, range.id).await.unwrap(), range);
+
+        store.delete_comment(video.id, late.id).await.unwrap();
+        assert_eq!(store.list_comments(video.id).await.unwrap(), vec![range]);
+        assert!(store.get_comment(video.id, late.id).await.is_err());
     }
 
     #[tokio::test]

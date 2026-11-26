@@ -5,6 +5,7 @@ import { useApiConfig } from "@/api/api-context";
 import { useCommands } from "@/commands/commands-context";
 import { tilePosition } from "@/features/library/video-thumbnail";
 import { cn } from "@/lib/utils";
+import { type CommentItem, commentsAt, excerpt } from "../comments";
 import { formatTimecode } from "../navigation";
 import { timelineCommands } from "./timeline-commands";
 import type { Hover, TimelineController } from "./timeline-controller";
@@ -23,6 +24,7 @@ export function Timeline({
   timeline,
   waveform,
   attacks,
+  comments,
 }: {
   video: Video;
   videoRef: RefObject<HTMLVideoElement | null>;
@@ -31,6 +33,8 @@ export function Timeline({
   timeline: TimelineController;
   waveform: Waveform | null;
   attacks: Attacks | null;
+  /** Shown in the hover preview at their moment. */
+  comments: readonly CommentItem[];
 }) {
   const { t } = useTranslation();
   const overviewRef = useRef<HTMLCanvasElement>(null);
@@ -88,7 +92,7 @@ export function Timeline({
         className="block h-24 w-full cursor-pointer touch-none border-t"
         data-testid="timeline-detail"
       />
-      <FramePreview video={video} mediaSrc={mediaSrc} hover={hover} />
+      <FramePreview video={video} mediaSrc={mediaSrc} hover={hover} comments={comments} />
     </div>
   );
 }
@@ -102,11 +106,14 @@ function FramePreview({
   video,
   mediaSrc,
   hover,
+  comments,
 }: {
   video: Video;
   mediaSrc: string;
   hover: Hover | null;
+  comments: readonly CommentItem[];
 }) {
+  const said = hover ? commentsAt(comments, hover.time)[0] : undefined;
   const config = useApiConfig();
   const frameRef = useRef<HTMLVideoElement>(null);
   const seeking = useRef<{ busy: boolean; current: number; next: number | null }>({
@@ -196,6 +203,14 @@ function FramePreview({
       <div className="bg-black/80 px-2 py-0.5 text-center font-mono text-xs text-white/90 tabular-nums">
         {hover ? formatTimecode(hover.time, true) : ""}
       </div>
+      {said && (
+        <div
+          className="border-t border-violet-400/30 bg-black/85 px-2 py-1 text-xs text-violet-200"
+          data-testid="timeline-preview-comment"
+        >
+          {excerpt(said.body)}
+        </div>
+      )}
     </div>
   );
 }

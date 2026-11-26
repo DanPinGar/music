@@ -115,7 +115,9 @@
     "previousMarker": "Marcador o sección anterior",
     "nextMarker": "Marcador o sección siguiente",
     "jumpToMarker": "Ir al marcador 1–9",
-    "toggleMarkersPanel": "Mostrar u ocultar el panel de marcadores"
+    "toggleMarkersPanel": "Mostrar u ocultar el panel de marcadores",
+    "addComment": "Comentar aquí",
+    "showComments": "Mostrar los comentarios"
   },
   "commandGroups": {
     "general": "General",
@@ -123,7 +125,8 @@
     "playback": "Reproducción",
     "view": "Vista",
     "loops": "Bucles",
-    "markers": "Marcadores"
+    "markers": "Marcadores",
+    "comments": "Comentarios"
   },
   "keys": {
     "space": "Espacio"
@@ -171,9 +174,9 @@
   },
   "goTo": {
     "title": "Ir a",
-    "description": "Un tiempo, un compás, un fotograma o un marcador",
+    "description": "Un tiempo, un compás, un fotograma, un marcador o un comentario",
     "placeholder": "1:23.5 · c32 · c32.3 · f740 · nombre de un marcador",
-    "nothing": "Escribe un tiempo (1:23.5), un compás (c32), un fotograma (f740) o el nombre de un marcador.",
+    "nothing": "Escribe un tiempo (1:23.5), un compás (c32), un fotograma (f740), el nombre de un marcador o el texto de un comentario.",
     "needsGrid": "Para ir a un compás, marca antes el pulso con T.",
     "time": "Ir a {{time}}",
     "frame": "Ir al fotograma {{frame}}",
@@ -194,5 +197,23 @@
       "section": "Sección",
       "loop": "Bucle guardado"
     }
+  },
+  "comments": {
+    "title": "Comentarios",
+    "filter": "Filtrar los comentarios…",
+    "empty": "Aún no hay comentarios. C escribe uno en el cursor, también mientras suena.",
+    "noMatches": "Ningún comentario contiene ese texto.",
+    "jump": "Ir a este momento",
+    "edit": "Reescribir",
+    "delete": "Borrar",
+    "saveFailed": "No se ha podido guardar el comentario",
+    "at": "En {{time}}",
+    "stretch": "De {{start}} a {{end}}",
+    "useMoment": "En el cursor",
+    "useLoop": "Sobre el bucle",
+    "placeholder": "Escribe en Markdown: **negrita**, listas… Los tiempos como 1:23.5 se vuelven enlaces.",
+    "help": "Ctrl+Intro guarda · Esc cancela",
+    "cancel": "Cancelar",
+    "save": "Guardar"
   }
 }

@@ -1,4 +1,4 @@
-import { FlagIcon, PencilIcon, RepeatIcon, SquareIcon, Trash2Icon, XIcon } from "lucide-react";
+import { FlagIcon, PencilIcon, RepeatIcon, SquareIcon, Trash2Icon } from "lucide-react";
 import { type KeyboardEvent, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useCommandRegistry } from "@/commands/commands-context";
@@ -12,15 +12,13 @@ import type { MarkerActions } from "./use-markers";
 
 const KIND_ICONS = { point: FlagIcon, section: SquareIcon, loop: RepeatIcon } as const;
 
-/** Side panel: every marker, section and saved loop, to jump to, rename, recolour or delete. */
+/** Every marker, section and saved loop, to jump to, rename, recolour or delete. */
 export function MarkersPanel({
   runtime,
   markers,
-  onClose,
 }: {
   runtime: PlayerRuntime;
   markers: MarkerActions;
-  onClose: () => void;
 }) {
   const { t } = useTranslation();
   const registry = useCommandRegistry();
@@ -49,16 +47,7 @@ export function MarkersPanel({
   };
 
   return (
-    <aside className="flex w-72 shrink-0 flex-col border-l" data-testid="markers-panel">
-      <div className="flex h-10 shrink-0 items-center gap-2 border-b px-3">
-        <h2 className="flex-1 text-sm font-medium">
-          {t("markers.title")}{" "}
-          <span className="text-muted-foreground">({markers.items.length})</span>
-        </h2>
-        <Button variant="ghost" size="icon-sm" aria-label={t("common.close")} onClick={onClose}>
-          <XIcon />
-        </Button>
-      </div>
+    <div className="flex min-h-0 flex-1 flex-col" data-testid="markers-panel">
       <div className="flex shrink-0 flex-col gap-1 border-b p-2">
         <Button
           variant="ghost"
@@ -181,6 +170,6 @@ export function MarkersPanel({
           );
         })}
       </ul>
-    </aside>
+    </div>
   );
 }

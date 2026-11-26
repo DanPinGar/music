@@ -115,7 +115,9 @@
     "previousMarker": "Previous marker or section",
     "nextMarker": "Next marker or section",
     "jumpToMarker": "Go to marker 1–9",
-    "toggleMarkersPanel": "Show or hide the markers panel"
+    "toggleMarkersPanel": "Show or hide the markers panel",
+    "addComment": "Comment here",
+    "showComments": "Show the comments"
   },
   "commandGroups": {
     "general": "General",
@@ -123,7 +125,8 @@
     "playback": "Playback",
     "view": "View",
     "loops": "Loops",
-    "markers": "Markers"
+    "markers": "Markers",
+    "comments": "Comments"
   },
   "keys": {
     "space": "Space"
@@ -171,9 +174,9 @@
   },
   "goTo": {
     "title": "Go to",
-    "description": "A time, a bar, a frame or a marker",
+    "description": "A time, a bar, a frame, a marker or a comment",
     "placeholder": "1:23.5 · b32 · b32.3 · f740 · a marker's name",
-    "nothing": "Type a time (1:23.5), a bar (b32), a frame (f740) or a marker's name.",
+    "nothing": "Type a time (1:23.5), a bar (b32), a frame (f740), a marker's name or a comment's text.",
     "needsGrid": "To go to a bar, tap the beat with T first.",
     "time": "Go to {{time}}",
     "frame": "Go to frame {{frame}}",
@@ -194,5 +197,23 @@
       "section": "Section",
       "loop": "Saved loop"
     }
+  },
+  "comments": {
+    "title": "Comments",
+    "filter": "Filter the comments…",
+    "empty": "No comments yet. C writes one at the playhead, even while playing.",
+    "noMatches": "No comment contains that text.",
+    "jump": "Go to this moment",
+    "edit": "Rewrite",
+    "delete": "Delete",
+    "saveFailed": "The comment could not be saved",
+    "at": "At {{time}}",
+    "stretch": "From {{start}} to {{end}}",
+    "useMoment": "At the playhead",
+    "useLoop": "Over the loop",
+    "placeholder": "Write in Markdown: **bold**, lists… Times such as 1:23.5 become links.",
+    "help": "Ctrl+Enter saves · Esc cancels",
+    "cancel": "Cancel",
+    "save": "Save"
   }
 }

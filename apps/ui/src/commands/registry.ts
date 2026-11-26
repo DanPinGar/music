@@ -8,6 +8,7 @@ export const COMMAND_GROUPS = [
   "view",
   "loops",
   "markers",
+  "comments",
 ] as const;
 export type CommandGroup = (typeof COMMAND_GROUPS)[number];
 

@@ -109,6 +109,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/videos/{id}/comments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The video's comments, in time order. */
+        get: operations["list_comments"];
+        put?: never;
+        /** Comments on a moment or a stretch of the video. */
+        post: operations["create_comment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/videos/{id}/comments/{comment_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Rewrites a comment or moves it. */
+        put: operations["update_comment"];
+        post?: never;
+        /** Deletes a comment. */
+        delete: operations["delete_comment"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/videos/{id}/markers": {
         parameters: {
             query?: never;
@@ -245,6 +281,33 @@ export interface components {
              * @description Index of a beat that starts bar 1 (it may lie outside `beats_ms`).
              */
             downbeat: number;
+        };
+        /** @description A comment on a moment or a stretch of a video. */
+        CommentDto: {
+            /** @description Markdown. */
+            body: string;
+            /** Format: date-time */
+            created_at: string;
+            /**
+             * Format: int64
+             * @description End of the stretch commented on; absent for a moment.
+             */
+            end_ms?: number | null;
+            /** Format: uuid */
+            id: string;
+            /** Format: int64 */
+            start_ms: number;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description The text and anchor of a comment, to create one or replace an existing one's. */
+        CommentFieldsDto: {
+            /** @description Markdown, not empty. */
+            body: string;
+            /** Format: int64 */
+            end_ms?: number | null;
+            /** Format: int64 */
+            start_ms: number;
         };
         /** @description Result of the liveness probe. */
         Health: {
@@ -684,6 +747,198 @@ export interface operations {
                 };
             };
             /** @description No such video, or no attacks yet */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    list_comments: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Video id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The comments */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CommentDto"][];
+                };
+            };
+            /** @description Missing or invalid token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description No such video */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    create_comment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Video id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CommentFieldsDto"];
+            };
+        };
+        responses: {
+            /** @description The new comment */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CommentDto"];
+                };
+            };
+            /** @description Empty, or a stretch that ends before it starts */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Missing or invalid token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description No such video */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    update_comment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Video id */
+                id: string;
+                /** @description Comment id */
+                comment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CommentFieldsDto"];
+            };
+        };
+        responses: {
+            /** @description The comment as saved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CommentDto"];
+                };
+            };
+            /** @description Empty, or a stretch that ends before it starts */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Missing or invalid token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description No such video or comment */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    delete_comment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Video id */
+                id: string;
+                /** @description Comment id */
+                comment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description No such video or comment */
             404: {
                 headers: {
                     [name: string]: unknown;

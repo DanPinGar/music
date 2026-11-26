@@ -15,6 +15,8 @@ export type VideoState = components["schemas"]["VideoStateDto"];
 export type Marker = components["schemas"]["MarkerDto"];
 export type NewMarker = components["schemas"]["NewMarkerDto"];
 export type MarkerChanges = components["schemas"]["MarkerChangesDto"];
+export type Comment = components["schemas"]["CommentDto"];
+export type CommentFields = components["schemas"]["CommentFieldsDto"];
 
 /** Files of a video that elements load by URL: `<video src>`, CSS backgrounds… */
 export type VideoAsset = "media" | "thumbnails" | "peaks";

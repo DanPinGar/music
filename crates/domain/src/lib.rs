@@ -4,6 +4,7 @@
 //! and `segno-media` implement the ports; nothing here knows about SQLite, ffmpeg, HTTP or
 //! Tauri.
 
+mod comment;
 mod error;
 pub mod library;
 mod marker;
@@ -11,6 +12,7 @@ mod media;
 mod state;
 mod video;
 
+pub use comment::{Comment, CommentFields, CommentId, CommentRepository};
 pub use error::{DomainError, Result};
 pub use marker::{Marker, MarkerFields, MarkerId, MarkerKind, MarkerRepository};
 pub use media::{

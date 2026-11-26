@@ -1,6 +1,7 @@
 import type { Attacks } from "@segno/api-client";
 import { firstAtOrAfter } from "../attacks";
 import { type BeatGrid, gridLines } from "../beat-grid";
+import { COMMENT_COLOR, type CommentItem } from "../comments";
 import { type Loop, MIN_LOOP_SECONDS, snapTo } from "../loop";
 import { DEFAULT_MARKER_COLOR, type MarkerItem, markerTimes } from "../markers";
 import { formatTimecode } from "../navigation";
@@ -148,6 +149,7 @@ export class TimelineController {
   #attacks: Attacks | null = null;
   #grid: BeatGrid | null = null;
   #markers: readonly MarkerItem[] = [];
+  #comments: readonly CommentItem[] = [];
   #loop: Loop | null = null;
   #handlers: TimelineHandlers | null = null;
   #preview: Preview | null = null;
@@ -210,6 +212,11 @@ export class TimelineController {
 
   setMarkers(markers: readonly MarkerItem[]): void {
     this.#markers = markers;
+    this.#version++;
+  }
+
+  setComments(comments: readonly CommentItem[]): void {
+    this.#comments = comments;
     this.#version++;
   }
 
@@ -632,6 +639,7 @@ export class TimelineController {
     this.#drawWave(surface, palette, whole, 3, surface.height - 3, playX);
     this.#drawLoop(surface, whole, false);
     this.#drawPoints(surface, whole, false);
+    this.#drawComments(surface, whole, 0);
 
     // The stretch shown in the detail view.
     const left = xAt(whole, this.#view.start, surface.width);
@@ -697,8 +705,33 @@ export class TimelineController {
     this.#drawAttacks(surface, view, bottom);
     this.#drawLoop(surface, view, true);
     this.#drawPoints(surface, view, true);
+    this.#drawComments(surface, view, RULER_HEIGHT + SECTION_BAND + 2);
     this.#drawHover(surface, palette, view);
     this.#drawPlayhead(surface, palette, playX, true);
+  }
+
+  /** Comments: a speech-bubble dot at their moment, a line along their stretch. */
+  #drawComments(surface: Surface, view: View, top: number): void {
+    const { context, width } = surface;
+    context.fillStyle = COMMENT_COLOR;
+    const y = top + 4;
+    for (const comment of this.#comments) {
+      const left = xAt(view, comment.start, width);
+      const right = comment.end === null ? left : xAt(view, comment.end, width);
+      if (right < -6 || left > width + 6) continue;
+      context.globalAlpha = 0.9;
+      if (comment.end !== null) context.fillRect(left, y - 1, Math.max(1, right - left), 2);
+      context.beginPath();
+      context.arc(left, y, 3.5, 0, Math.PI * 2);
+      context.fill();
+      // The bubble's tail.
+      context.beginPath();
+      context.moveTo(left - 1, y + 2);
+      context.lineTo(left - 3, y + 6);
+      context.lineTo(left + 2, y + 3);
+      context.fill();
+    }
+    context.globalAlpha = 1;
   }
 
   #currentLoop(): Loop | null {

@@ -15,7 +15,8 @@ use std::sync::Arc;
 use axum::Router;
 use axum::middleware;
 use segno_domain::{
-    MarkerRepository, MediaProbe, MediaStore, VideoRepository, VideoStateRepository,
+    CommentRepository, MarkerRepository, MediaProbe, MediaStore, VideoRepository,
+    VideoStateRepository,
 };
 use serde::Serialize;
 use tokio::net::TcpListener;
@@ -37,6 +38,7 @@ pub struct AppState {
     /// Where the user left each video.
     pub states: Arc<dyn VideoStateRepository>,
     pub markers: Arc<dyn MarkerRepository>,
+    pub comments: Arc<dyn CommentRepository>,
     /// The library's media files.
     pub media_files: Arc<dyn MediaStore>,
     /// Reads media files; `None` when ffmpeg is not available, so imports are refused.
@@ -110,6 +112,14 @@ fn protected_routes() -> OpenApiRouter<AppState> {
         .routes(routes!(
             routes::markers::update_marker,
             routes::markers::delete_marker
+        ))
+        .routes(routes!(
+            routes::comments::list_comments,
+            routes::comments::create_comment
+        ))
+        .routes(routes!(
+            routes::comments::update_comment,
+            routes::comments::delete_comment
         ))
 }
 

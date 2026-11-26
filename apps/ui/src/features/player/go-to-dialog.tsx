@@ -11,6 +11,7 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { barTime } from "./beat-grid";
+import { type CommentItem, excerpt, filterComments } from "./comments";
 import { parseGoTo, searchable } from "./go-to";
 import type { MarkerItem } from "./markers";
 import { formatTimecode } from "./navigation";
@@ -22,11 +23,13 @@ export function GoToDialog({
   onOpenChange,
   runtime,
   markers,
+  comments,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   runtime: PlayerRuntime;
   markers: readonly MarkerItem[];
+  comments: readonly CommentItem[];
 }) {
   const { t } = useTranslation();
   const [text, setText] = useState("");
@@ -55,6 +58,8 @@ export function GoToDialog({
       searchable(marker.label).includes(query) ||
       String(marker.number ?? "") === query,
   );
+  // Comments only once something is typed: there can be many.
+  const said = query === "" ? [] : filterComments(comments, text).slice(0, 20);
 
   const close = (open: boolean) => {
     if (!open) setText("");
@@ -97,6 +102,22 @@ export function GoToDialog({
                   </span>
                   <span className="font-mono text-xs text-muted-foreground tabular-nums">
                     {formatTimecode(marker.start, true)}
+                  </span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          )}
+          {said.length > 0 && (
+            <CommandGroup heading={t("comments.title")}>
+              {said.map((comment) => (
+                <CommandItem
+                  key={comment.id}
+                  value={`comment-${comment.id}`}
+                  onSelect={() => go(comment.start)}
+                >
+                  <span className="flex-1 truncate">{excerpt(comment.body, 70)}</span>
+                  <span className="font-mono text-xs text-muted-foreground tabular-nums">
+                    {formatTimecode(comment.start, true)}
                   </span>
                 </CommandItem>
               ))}

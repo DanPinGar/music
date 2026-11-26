@@ -20,6 +20,9 @@ const PRE_ROLLS = [0, 1, 2, 4] as const;
 export interface StudyUi {
   addMarker(kind: Marker["kind"], start: number, end?: number, color?: string): void;
   toggleMarkersPanel(): void;
+  /** Starts writing a comment at the playhead. */
+  addComment(): void;
+  showComments(): void;
   /** Tells the user why a command did nothing. */
   explain(message: "loopNeedsRange"): void;
 }
@@ -240,6 +243,20 @@ export function studyCommands(runtime: PlayerRuntime, ui: StudyUi): Command[] {
       title: "commands.toggleMarkersPanel",
       group: "markers",
       run: () => ui.toggleMarkersPanel(),
+    },
+    {
+      id: "comments.add",
+      title: "commands.addComment",
+      group: "comments",
+      keys: ["C"],
+      enabled,
+      run: () => ui.addComment(),
+    },
+    {
+      id: "comments.showPanel",
+      title: "commands.showComments",
+      group: "comments",
+      run: () => ui.showComments(),
     },
   ];
 }

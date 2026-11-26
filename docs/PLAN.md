@@ -121,7 +121,7 @@ GET              /videos/{id}/peaks      waveform peaks
 GET              /videos/{id}/attacks    attacks (note onsets) found in the audio
 GET  PUT         /videos/{id}/state      remembered position, speed, loop, zoom, beat grid
 CRUD             /videos/{id}/markers    (PUT replaces a marker's editable fields)
-CRUD             /videos/{id}/comments
+CRUD             /videos/{id}/comments   (PUT replaces a comment's text and anchor)
 POST             /videos/{id}/pipelines  start transcription, score or analysis
 GET  POST        /videos/{id}/notes      note-set revisions (editor)
 GET              /videos/{id}/score      MusicXML for a revision
@@ -176,7 +176,7 @@ Library/
 | `video_states`                      | video_id, state (JSON: position, speed, step unit, zoom, beat grid, loop, practice)            |
 | `tags`, `video_tags`, `collections` | library organisation                                                                           |
 | `markers`                           | id, video_id, kind (point/section/loop), start_ms, end_ms, label, color                        |
-| `comments`                          | id, video_id, start_ms, end_ms, anchor (moment/bar/note), body_md                              |
+| `comments`                          | id, video_id, start_ms, end_ms, body (Markdown); a bar or note anchor once there is a score    |
 | `jobs`                              | id, video_id, kind, status, progress, params, error, attempts, timestamps                      |
 | `artifacts`                         | id, video_id, kind, schema, producer@version, params_hash, parents, path                       |
 | `note_revisions`                    | id, video_id, number, parent, author (auto/user), artifact_id                                  |
@@ -299,7 +299,8 @@ Built on 26 November 2026:
   - the beat grid (bar lines and numbers), sections as coloured bands, numbered markers and the loop, on both levels;
   - **Shift + drag** makes a loop; loop edges and markers drag, snapping to beats, attacks and markers (`Alt` for no snapping);
   - a **double-click** adds a marker.
-- Still to come: comments on the overview, audible scrubbing, and the right-click menu (the markers panel does its job for now).
+- Comments appear as violet bubbles (a line along a stretch), and the hover preview shows the comment for that moment.
+- Still to come: audible scrubbing, and the right-click menu (the side panel does its job for now).
 
 #### Keyboard
 
@@ -328,7 +329,7 @@ All shortcuts are configurable and none needs AltGr on a Spanish keyboard. The s
 
 `Esc` always returns focus to the player, for example after typing a comment.
 
-Built on 26 November 2026: every key in the table except `C` (comments come next). Also:
+Built on 26 November 2026: every key in the table. Also:
 
 - `Shift + R` removes the loop.
 - `1`–`9` count points and sections in time order.
@@ -414,6 +415,11 @@ Done in the background after a download or import:
   - The side panel lists them in time order. Click jumps, double-click renames, the dot changes the colour (8 colours), and sections and saved loops can be looped over.
   - A loop becomes a section ("make a section from the loop") or a saved loop.
 - Markdown comments anchored to a moment or a range and, once there is a score, to a bar or a note. Filterable side panel; clicking a comment jumps there.
+- _Comments built on 26 November 2026:_
+  - **Writing:** `C` starts a comment at the playhead, even while playing. It can be moved over the loop instead. `Ctrl + Enter` saves and `Esc` cancels; either way the keys go back to the player.
+  - **Display:** Markdown via react-markdown, which never renders raw HTML. Times written in a comment ("repeat from 1:12.5") become links that jump there. Other links are shown but not followed, so the app's window never navigates away.
+  - **Side panel:** a tab next to the markers' one. Comments can be filtered by text, ignoring accents. The ones about the moment playing are highlighted. Each one can be rewritten, deleted, or looped over when it covers a stretch.
+  - **Search:** `G` finds comments by their text.
 
 ### 4.4 Hybrid transcription
 
@@ -575,7 +581,7 @@ Each phase ends with something usable and a verifiable exit criterion.
    - _a wrap gap of 7–18 ms._
 
    _See 4.2 and 4.3.)_
-4. Comments anchored to time.
+4. Comments anchored to time. _(Done: Markdown, on a moment or a stretch, with time links, a filterable panel, on the timeline and in its hover preview; see 4.3.)_
 5. YouTube downloads, chapters as markers, and the library (search, tags, remembered state).
 
 - Navigation is tried with real videos from the first build, then adjusted and measured.

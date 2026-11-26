@@ -3,7 +3,8 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use segno_domain::{
-    MarkerRepository, MediaPreparer, MediaProbe, MediaStore, VideoRepository, VideoStateRepository,
+    CommentRepository, MarkerRepository, MediaPreparer, MediaProbe, MediaStore, VideoRepository,
+    VideoStateRepository,
 };
 use segno_media::{FfmpegPreparer, FfprobeProbe, MediaTools};
 use segno_storage::{LibraryFiles, SqliteStore};
@@ -38,6 +39,7 @@ pub async fn local_state(library_dir: &Path, tool_dirs: &[PathBuf]) -> anyhow::R
     });
     let states: Arc<dyn VideoStateRepository> = Arc::new(store.clone());
     let markers: Arc<dyn MarkerRepository> = Arc::new(store.clone());
+    let comments: Arc<dyn CommentRepository> = Arc::new(store.clone());
     let videos: Arc<dyn VideoRepository> = Arc::new(store);
     let media_files: Arc<dyn MediaStore> = Arc::new(LibraryFiles::new(library_dir));
 
@@ -63,6 +65,7 @@ pub async fn local_state(library_dir: &Path, tool_dirs: &[PathBuf]) -> anyhow::R
         videos,
         states,
         markers,
+        comments,
         media_files,
         probe,
         preparations,
