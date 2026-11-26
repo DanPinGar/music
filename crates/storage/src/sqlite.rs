@@ -69,11 +69,31 @@ impl SqliteStore {
             .await
             .map_err(DomainError::storage)
     }
+
+    /// Whether a migration left `job` for the core to do once (a `pending:<job>` setting).
+    pub async fn pending(&self, job: &str) -> Result<bool> {
+        let found: Option<String> = sqlx::query_scalar("SELECT value FROM settings WHERE key = ?")
+            .bind(format!("pending:{job}"))
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(DomainError::storage)?;
+        Ok(found.is_some())
+    }
+
+    /// Marks a job a migration left as done.
+    pub async fn done(&self, job: &str) -> Result<()> {
+        sqlx::query("DELETE FROM settings WHERE key = ?")
+            .bind(format!("pending:{job}"))
+            .execute(&self.pool)
+            .await
+            .map_err(DomainError::storage)?;
+        Ok(())
+    }
 }
 
 macro_rules! video_columns {
     () => {
-        "id, source, source_url, title, channel, duration_ms, fps, width, height, status, media_file, proxy_file, thumbnails_file, peaks_file, attacks_file, preparation_error, import_error, created_at, updated_at"
+        "id, source, source_url, title, artist, year, channel, duration_ms, fps, width, height, status, media_file, proxy_file, thumbnails_file, peaks_file, attacks_file, preparation_error, import_error, created_at, updated_at"
     };
 }
 
@@ -85,6 +105,8 @@ fn bind_fields<'q>(query: SqliteQuery<'q>, video: &'q Video) -> SqliteQuery<'q> 
         .bind(video.source.as_str())
         .bind(&video.source_url)
         .bind(&video.title)
+        .bind(&video.artist)
+        .bind(video.year)
         .bind(&video.channel)
         .bind(video.duration_ms)
         .bind(video.fps)
@@ -108,6 +130,8 @@ struct VideoRow {
     source: String,
     source_url: Option<String>,
     title: String,
+    artist: Option<String>,
+    year: Option<i32>,
     channel: Option<String>,
     duration_ms: Option<i64>,
     fps: Option<f64>,
@@ -132,6 +156,8 @@ impl VideoRow {
             source: self.source.parse()?,
             source_url: self.source_url,
             title: self.title,
+            artist: self.artist,
+            year: self.year,
             channel: self.channel,
             duration_ms: self.duration_ms,
             fps: self.fps,
@@ -258,7 +284,7 @@ impl VideoRepository for SqliteStore {
         let query = sqlx::query(concat!(
             "INSERT INTO videos (",
             video_columns!(),
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         ))
         .bind(video.id.to_string());
         bind_fields(query, video)
@@ -272,9 +298,9 @@ impl VideoRepository for SqliteStore {
     async fn update(&self, video: &Video) -> Result<()> {
         let mut transaction = self.pool.begin().await.map_err(DomainError::storage)?;
         let query = sqlx::query(
-            "UPDATE videos SET source = ?, source_url = ?, title = ?, channel = ?, \
-             duration_ms = ?, fps = ?, width = ?, height = ?, status = ?, media_file = ?, \
-             proxy_file = ?, thumbnails_file = ?, peaks_file = ?, attacks_file = ?, \
+            "UPDATE videos SET source = ?, source_url = ?, title = ?, artist = ?, year = ?, \
+             channel = ?, duration_ms = ?, fps = ?, width = ?, height = ?, status = ?, \
+             media_file = ?, proxy_file = ?, thumbnails_file = ?, peaks_file = ?, attacks_file = ?, \
              preparation_error = ?, import_error = ?, created_at = ?, updated_at = ? \
              WHERE id = ? AND deleted_at IS NULL",
         );
@@ -738,9 +764,23 @@ mod tests {
 
         video.tags = vec!["Ballad".into()];
         video.import_error = Some("Video unavailable".into());
+        video.artist = Some("Thelonious Monk".into());
+        video.year = Some(1965);
         store.update(&video).await.unwrap();
         let loaded = store.list().await.unwrap();
         assert_eq!(loaded, vec![video]);
+    }
+
+    #[tokio::test]
+    async fn migrations_leave_one_off_jobs_until_they_are_done() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("library.db");
+        let store = SqliteStore::open(&path).await.unwrap();
+        assert!(store.pending("guess_songs").await.unwrap());
+        assert!(!store.pending("unknown").await.unwrap());
+        store.done("guess_songs").await.unwrap();
+        let reopened = SqliteStore::open(&path).await.unwrap();
+        assert!(!reopened.pending("guess_songs").await.unwrap());
     }
 
     #[tokio::test]

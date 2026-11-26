@@ -12,6 +12,7 @@ mod fakes;
 pub mod library;
 mod marker;
 mod media;
+mod song;
 mod state;
 mod video;
 
@@ -21,8 +22,11 @@ pub use marker::{Marker, MarkerFields, MarkerId, MarkerKind, MarkerRepository};
 pub use media::{
     MediaInfo, MediaPreparer, MediaProbe, MediaStore, PreparationInput, ThumbnailSprite,
 };
+pub use song::{SongDetails, guess_song};
 pub use state::{
     BeatGrid, LoopRange, MAX_SPEED, MIN_SPEED, Practice, SpeedTrainer, StepUnit, Studied,
     TimelineView, VideoState, VideoStateRepository,
 };
-pub use video::{Video, VideoId, VideoRepository, VideoSource, VideoStatus, clean_tags};
+pub use video::{
+    Video, VideoChanges, VideoId, VideoRepository, VideoSource, VideoStatus, clean_tags,
+};

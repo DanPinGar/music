@@ -7,7 +7,7 @@ use chrono::Utc;
 
 use crate::{
     DomainError, Marker, MarkerFields, MarkerKind, MarkerRepository, MediaProbe, MediaStore,
-    Result, Video, VideoId, VideoRepository, VideoSource, VideoStatus,
+    Result, SongDetails, Video, VideoId, VideoRepository, VideoSource, VideoStatus, guess_song,
 };
 
 /// What YouTube says about a video before it is downloaded.
@@ -15,6 +15,10 @@ use crate::{
 pub struct RemoteVideo {
     pub title: String,
     pub channel: Option<String>,
+    /// The song's title, artist and year, when YouTube knows them (music it identified).
+    pub track: Option<String>,
+    pub artist: Option<String>,
+    pub release_year: Option<i32>,
     pub duration_ms: Option<i64>,
     pub chapters: Vec<Chapter>,
 }
@@ -156,9 +160,7 @@ async fn fetch_and_download(
 
     progress(DownloadStage::Fetching, 0.0);
     let info = context.downloader.fetch_info(&url).await?;
-    if !info.title.trim().is_empty() {
-        video.title = info.title.trim().to_owned();
-    }
+    video.apply_song(song_of(&info));
     video.channel = info.channel.clone();
     video.duration_ms = info.duration_ms.or(video.duration_ms);
     video.status = VideoStatus::Importing;
@@ -184,6 +186,23 @@ async fn fetch_and_download(
     video.media_file = Some(relative);
     video.status = VideoStatus::Ready;
     save(video, context.videos).await
+}
+
+/// The song in a YouTube video: what YouTube says about the music when it knows, guessed from
+/// the video's title otherwise. The upload date is not the song's year, so it is never used.
+pub fn song_of(info: &RemoteVideo) -> SongDetails {
+    let guess = guess_song(&info.title);
+    match (&info.track, &info.artist) {
+        (Some(track), Some(artist)) => SongDetails {
+            title: track.clone(),
+            artist: Some(artist.clone()),
+            year: info.release_year.or(guess.year),
+        },
+        _ => SongDetails {
+            year: guess.year.or(info.release_year),
+            ..guess
+        },
+    }
 }
 
 /// Chapters become sections, unless the video already has markers (a retried download).
@@ -255,8 +274,11 @@ mod tests {
         async fn fetch_info(&self, url: &str) -> Result<RemoteVideo> {
             assert_eq!(url, "https://www.youtube.com/watch?v=7A12z9S4F8U");
             Ok(RemoteVideo {
-                title: "Thelonious Monk - I'm Confessin'".into(),
+                title: "Thelonious Monk - I'm Confessin' 1930 [Stride Piano Synthesia]".into(),
                 channel: Some("itsRemco".into()),
+                track: None,
+                artist: None,
+                release_year: None,
                 duration_ms: Some(141_000),
                 chapters: vec![
                     Chapter {
@@ -322,6 +344,35 @@ mod tests {
         }
     }
 
+    #[test]
+    fn youtube_music_details_come_before_the_guess() {
+        let info = RemoteVideo {
+            title: "Dave Brubeck - Take Five 1959 (Piano Tutorial)".into(),
+            channel: None,
+            track: Some("Take Five".into()),
+            artist: Some("The Dave Brubeck Quartet".into()),
+            release_year: None,
+            duration_ms: None,
+            chapters: Vec::new(),
+        };
+        assert_eq!(
+            song_of(&info),
+            SongDetails {
+                title: "Take Five".into(),
+                artist: Some("The Dave Brubeck Quartet".into()),
+                year: Some(1959),
+            }
+        );
+        let unknown = RemoteVideo {
+            track: None,
+            artist: None,
+            release_year: Some(1961),
+            ..info
+        };
+        assert_eq!(song_of(&unknown).year, Some(1959), "the title's year wins");
+        assert_eq!(song_of(&unknown).artist.as_deref(), Some("Dave Brubeck"));
+    }
+
     #[tokio::test]
     async fn a_download_is_recorded_at_once_and_only_once() {
         let world = World::new(false);
@@ -354,7 +405,10 @@ mod tests {
         .unwrap();
 
         assert_eq!(ready.status, VideoStatus::Ready);
-        assert_eq!(ready.title, "Thelonious Monk - I'm Confessin'");
+        assert_eq!(
+            (ready.title.as_str(), ready.artist.as_deref(), ready.year),
+            ("I'm Confessin'", Some("Thelonious Monk"), Some(1930))
+        );
         assert_eq!(ready.channel.as_deref(), Some("itsRemco"));
         assert_eq!(ready.fps, Some(60.0));
         assert!(

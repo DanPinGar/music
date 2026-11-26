@@ -1011,15 +1011,28 @@ async function smoke() {
     await app.waitForSelector("[data-testid=edit-title]:focus", { timeout: 3_000 }).catch(() => {});
     await app.keyboard.press("Control+a");
     await app.keyboard.type("Smoke clip", { delay: 10 });
-    await app.keyboard.press("Tab");
-    await app.keyboard.type("Smoke, jazz, Smoke", { delay: 10 });
+    for (const field of ["Smoke Quartet", "1959", "Smoke, jazz, Smoke"]) {
+      await app.keyboard.press("Tab");
+      await app.keyboard.press("Control+a");
+      await app.keyboard.type(field, { delay: 10 });
+    }
     await app.keyboard.press("Enter");
-    await app.waitForSelector(`${card} >> text=Smoke clip`, { timeout: 5_000 }).catch(() => {});
+    await app.waitForSelector(`${card} >> text=Smoke Quartet`, { timeout: 5_000 }).catch(() => {});
     const edited = await fetchVideo(imported.id);
+    const name = squash(
+      await app
+        .locator(`${card} [data-testid=video-name]`)
+        .innerText()
+        .catch(() => ""),
+    );
     check(
-      "the card's menu renames and tags the video",
-      edited?.title === "Smoke clip" && edited?.tags.join(",") === "Smoke,jazz",
-      `${edited?.title} [${edited?.tags.join(", ")}]`,
+      "the card's menu edits the song (title, artist, year) and tags, shown as song · artist · year",
+      edited?.title === "Smoke clip" &&
+        edited?.artist === "Smoke Quartet" &&
+        edited?.year === 1959 &&
+        edited?.tags.join(",") === "Smoke,jazz" &&
+        name === "Smoke clip · Smoke Quartet · 1959",
+      `"${name}" [${edited?.tags.join(", ")}]`,
     );
 
     await app.waitForSelector("[data-slot=dialog-content]", { state: "detached" }).catch(() => {});

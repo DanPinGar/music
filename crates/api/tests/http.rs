@@ -107,6 +107,9 @@ impl VideoDownloader for FakeDownloader {
         Ok(RemoteVideo {
             title: "Monk - I'm Confessin'".into(),
             channel: Some("itsRemco".into()),
+            track: None,
+            artist: None,
+            release_year: None,
             duration_ms: Some(141_000),
             chapters: vec![
                 Chapter {
@@ -353,7 +356,9 @@ async fn imported_videos_can_be_played_with_range_requests() {
 
     let (status, _, video) = send(&h.app, import(&file)).await;
     assert_eq!(status, StatusCode::CREATED, "{video}");
-    assert_eq!(video["title"], "Monk - I'm Confessin'");
+    // The song comes from the file name.
+    assert_eq!(video["title"], "I'm Confessin'");
+    assert_eq!(video["artist"], "Monk");
     assert_eq!(video["status"], "ready");
     assert_eq!(video["fps"], 60.0);
     assert_eq!(video["duration_ms"], 141_154);
@@ -730,7 +735,8 @@ async fn youtube_videos_download_with_their_chapters_then_get_prepared() {
         v["status"] == "ready" && v["download"].is_null()
     })
     .await;
-    assert_eq!(ready["title"], "Monk - I'm Confessin'");
+    assert_eq!(ready["title"], "I'm Confessin'");
+    assert_eq!(ready["artist"], "Monk");
     assert_eq!(ready["channel"], "itsRemco");
     let prepared = wait_for(&h.app, &id, |v| v["seek_proxy"] == true).await;
     assert!(prepared["import_error"].is_null());
@@ -831,13 +837,27 @@ async fn videos_are_renamed_tagged_and_show_how_far_they_were_studied() {
         json_request(
             "PATCH",
             &uri,
-            json!({ "title": " Monk ballad ", "tags": ["Jazz", " jazz ", "To learn"] }),
+            json!({
+                "title": " Monk ballad ",
+                "artist": " Thelonious Monk ",
+                "year": 1965,
+                "tags": ["Jazz", " jazz ", "To learn"]
+            }),
         ),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{edited}");
     assert_eq!(edited["title"], "Monk ballad");
+    assert_eq!(edited["artist"], "Thelonious Monk");
+    assert_eq!(edited["year"], 1965);
     assert_eq!(edited["tags"], json!(["Jazz", "To learn"]));
+
+    // Left out, a field stays; null clears it.
+    let (_, _, cleared) = send(&h.app, json_request("PATCH", &uri, json!({ "year": null }))).await;
+    assert_eq!(
+        (&cleared["artist"], &cleared["year"]),
+        (&json!("Thelonious Monk"), &json!(null))
+    );
     assert!(edited["position_ms"].is_null());
 
     let state = json!({
@@ -855,6 +875,8 @@ async fn videos_are_renamed_tagged_and_show_how_far_they_were_studied() {
         json_request("PATCH", &uri, json!({ "title": "  " })),
     )
     .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, _, _) = send(&h.app, json_request("PATCH", &uri, json!({ "year": 0 }))).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 

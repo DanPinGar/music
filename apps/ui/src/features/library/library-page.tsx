@@ -26,6 +26,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import {
   allTags,
+  DEFAULT_ORDER,
   filterVideos,
   LIBRARY_ORDERS,
   type LibraryOrder,
@@ -41,9 +42,9 @@ const ORDER_KEY = "segno.library.order";
 function storedOrder(): LibraryOrder {
   try {
     const stored = localStorage.getItem(ORDER_KEY);
-    return LIBRARY_ORDERS.find((order) => order === stored) ?? "added";
+    return LIBRARY_ORDERS.find((order) => order === stored) ?? DEFAULT_ORDER;
   } catch {
-    return "added";
+    return DEFAULT_ORDER;
   }
 }
 
@@ -51,7 +52,7 @@ function storeOrder(order: LibraryOrder): void {
   try {
     localStorage.setItem(ORDER_KEY, order);
   } catch {
-    // Storage unavailable: the library opens sorted by date added.
+    // Storage unavailable: the library opens in the default order.
   }
 }
 

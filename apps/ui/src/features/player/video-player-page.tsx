@@ -10,6 +10,7 @@ import { useSystemInfo } from "@/api/use-system-info";
 import { useCommandRegistry, useCommands } from "@/commands/commands-context";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { videoName } from "@/features/library/library-filters";
 import { PreparationStatus } from "@/features/library/preparation-status";
 import { cn } from "@/lib/utils";
 import type { CommentDraft } from "./comments-panel";
@@ -184,7 +185,7 @@ function StudyPlayer({ video }: { video: Video }) {
   return (
     <div className="flex h-full flex-col">
       <div className="flex shrink-0 items-center gap-3 border-b px-4 py-2">
-        <h1 className="truncate font-heading text-base font-semibold">{video.title}</h1>
+        <h1 className="truncate font-heading text-base font-semibold">{videoName(video)}</h1>
         {video.width && video.height && (
           <span className="shrink-0 text-xs text-muted-foreground">
             {video.width}×{video.height} · {Math.round(fps * 100) / 100} fps

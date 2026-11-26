@@ -436,7 +436,7 @@
         "tags": [
           "videos"
         ],
-        "summary": "Renames a video or replaces its tags.",
+        "summary": "Changes a video's song (title, artist, year) or replaces its tags.",
         "operationId": "edit_video",
         "parameters": [
           {
@@ -472,7 +472,7 @@
             }
           },
           "400": {
-            "description": "An empty title, or too many or too long tags",
+            "description": "An empty title, a year out of range, or too many or too long tags",
             "content": {
               "application/json": {
                 "schema": {
@@ -2213,8 +2213,14 @@
       },
       "VideoChangesDto": {
         "type": "object",
-        "description": "Changes to a video: each field only when given.",
+        "description": "Changes to a video: each field only when given; `null` clears the artist or the year.",
         "properties": {
+          "artist": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "tags": {
             "type": [
               "array",
@@ -2229,7 +2235,17 @@
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "The song's title."
+          },
+          "year": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "maximum": 9999,
+            "minimum": 1
           }
         }
       },
@@ -2249,11 +2265,19 @@
           "updated_at"
         ],
         "properties": {
+          "artist": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Who wrote or plays the song."
+          },
           "channel": {
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "The YouTube channel the video comes from."
           },
           "created_at": {
             "type": "string",
@@ -2380,7 +2404,8 @@
             ]
           },
           "title": {
-            "type": "string"
+            "type": "string",
+            "description": "The song's title."
           },
           "updated_at": {
             "type": "string",
@@ -2393,6 +2418,14 @@
             ],
             "format": "int32",
             "minimum": 0
+          },
+          "year": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The year the song (or its album) was published."
           }
         }
       },

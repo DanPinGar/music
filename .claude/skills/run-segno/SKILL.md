@@ -69,7 +69,7 @@ It prints `PASS`/`FAIL` for 44 checks:
 - comments: `C` writes one in Markdown at the playhead, `Ctrl+Enter` saves it and gives the keys
   back, a time written in it jumps there, and the hover preview shows it;
 - the library, back from the player: the card shows how far the clip was studied, its `···`
-  menu renames and tags it, `/` searches by title and tags, `Ctrl+D` opens the download dialog
+  menu edits its song (title, artist, year, shown as "song · artist · year") and tags, `/` searches by title and tags, `Ctrl+D` opens the download dialog
   and refuses a link that is not YouTube's, and deleting the clip removes it and its files;
 - the tools dialog, opened from the palette, lists ffmpeg, yt-dlp and Deno, and the core
   reports them as external (it leaves the repository's `.tools` alone and installs nothing);

@@ -310,7 +310,13 @@ impl ProgressTracker {
 
 /// The video's details from yt-dlp's JSON.
 fn parse_info(json: &Value) -> Result<RemoteVideo> {
-    let text = |key: &str| json.get(key).and_then(Value::as_str).map(str::to_owned);
+    let text = |key: &str| {
+        json.get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .map(str::to_owned)
+    };
     let seconds_ms = |value: &Value| {
         value
             .as_f64()
@@ -336,9 +342,29 @@ fn parse_info(json: &Value) -> Result<RemoteVideo> {
                 .collect()
         })
         .unwrap_or_default();
+    // YouTube's music details, for the songs it identified: "artists" is a list in recent
+    // yt-dlp versions, "artist" a comma-separated text in older ones.
+    let artists = json
+        .get("artists")
+        .and_then(Value::as_array)
+        .map(|artists| {
+            artists
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .filter(|artists| !artists.is_empty());
+    let release_year = json
+        .get("release_year")
+        .and_then(Value::as_i64)
+        .and_then(|year| i32::try_from(year).ok());
     Ok(RemoteVideo {
         title,
         channel: text("channel").or_else(|| text("uploader")),
+        track: text("track"),
+        artist: artists.or_else(|| text("artist")),
+        release_year,
         duration_ms,
         chapters,
     })
@@ -406,6 +432,30 @@ mod tests {
         let info = parse_info(&json).unwrap();
         assert!(info.chapters.is_empty());
         assert_eq!(info.channel.as_deref(), Some("itsRemco"));
+        assert_eq!(
+            (info.track, info.artist, info.release_year),
+            (None, None, None)
+        );
+    }
+
+    #[test]
+    fn music_details_are_read_when_youtube_has_them() {
+        let json = serde_json::json!({
+            "title": "Take Five",
+            "track": "Take Five",
+            "artists": ["The Dave Brubeck Quartet", "Paul Desmond"],
+            "release_year": 1959
+        });
+        let info = parse_info(&json).unwrap();
+        assert_eq!(info.track.as_deref(), Some("Take Five"));
+        assert_eq!(
+            info.artist.as_deref(),
+            Some("The Dave Brubeck Quartet, Paul Desmond")
+        );
+        assert_eq!(info.release_year, Some(1959));
+        let older = serde_json::json!({ "title": "x", "artist": "Monk", "track": " " });
+        let info = parse_info(&older).unwrap();
+        assert_eq!((info.track, info.artist.as_deref()), (None, Some("Monk")));
     }
 
     #[test]

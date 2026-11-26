@@ -8,7 +8,9 @@ use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 use segno_domain::download::{self, DownloadStage};
 use segno_domain::library::{self, PreparationStage};
-use segno_domain::{Studied, ThumbnailSprite, Video, VideoId, VideoSource, VideoStatus};
+use segno_domain::{
+    Studied, ThumbnailSprite, Video, VideoChanges, VideoId, VideoSource, VideoStatus,
+};
 use serde::{Deserialize, Serialize};
 use tower::ServiceExt;
 use tower_http::services::ServeFile;
@@ -25,7 +27,13 @@ pub struct VideoDto {
     pub source: VideoSourceDto,
     /// Original address, for downloaded videos.
     pub source_url: Option<String>,
+    /// The song's title.
     pub title: String,
+    /// Who wrote or plays the song.
+    pub artist: Option<String>,
+    /// The year the song (or its album) was published.
+    pub year: Option<i32>,
+    /// The YouTube channel the video comes from.
     pub channel: Option<String>,
     pub duration_ms: Option<i64>,
     pub fps: Option<f64>,
@@ -187,6 +195,8 @@ impl VideoDto {
             },
             source_url: video.source_url,
             title: video.title,
+            artist: video.artist,
+            year: video.year,
             channel: video.channel,
             duration_ms: video.duration_ms,
             fps: video.fps,
@@ -308,15 +318,31 @@ pub async fn get_video(
     Ok(Json(state.video_dto(video).await?))
 }
 
-/// Changes to a video: each field only when given.
+/// Changes to a video: each field only when given; `null` clears the artist or the year.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct VideoChangesDto {
+    /// The song's title.
     pub title: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    #[schema(value_type = Option<String>)]
+    pub artist: Option<Option<String>>,
+    #[serde(default, deserialize_with = "present")]
+    #[schema(value_type = Option<i32>, minimum = 1, maximum = 9999)]
+    pub year: Option<Option<i32>>,
     /// Replaces all the video's tags.
     pub tags: Option<Vec<String>>,
 }
 
-/// Renames a video or replaces its tags.
+/// A field that was given, even as `null` (`Some(None)`), apart from one left out (`None`).
+fn present<'de, T, D>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    T: Deserialize<'de>,
+    D: serde::Deserializer<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
+}
+
+/// Changes a video's song (title, artist, year) or replaces its tags.
 #[utoipa::path(
     patch,
     path = "/videos/{id}",
@@ -326,7 +352,7 @@ pub struct VideoChangesDto {
     request_body = VideoChangesDto,
     responses(
         (status = 200, description = "The video as saved", body = VideoDto),
-        (status = 400, description = "An empty title, or too many or too long tags", body = Problem),
+        (status = 400, description = "An empty title, a year out of range, or too many or too long tags", body = Problem),
         (status = 401, description = "Missing or invalid token", body = Problem),
         (status = 404, description = "No such video", body = Problem)
     )
@@ -337,7 +363,12 @@ pub async fn edit_video(
     Json(changes): Json<VideoChangesDto>,
 ) -> Result<Json<VideoDto>, ApiError> {
     let mut video = state.videos.get(VideoId::from_uuid(id)).await?;
-    video.edit(changes.title.as_deref(), changes.tags.as_deref())?;
+    video.edit(VideoChanges {
+        title: changes.title.as_deref(),
+        artist: changes.artist.as_ref().map(Option::as_deref),
+        year: changes.year,
+        tags: changes.tags.as_deref(),
+    })?;
     state.videos.update(&video).await?;
     Ok(Json(state.video_dto(video).await?))
 }

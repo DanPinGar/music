@@ -2,8 +2,19 @@ import type { Video } from "@segno/api-client";
 import { searchable } from "@/features/player/go-to";
 
 /** How the library is sorted. */
-export type LibraryOrder = "added" | "studied" | "title";
-export const LIBRARY_ORDERS: readonly LibraryOrder[] = ["added", "studied", "title"];
+export type LibraryOrder = "year" | "added" | "studied" | "title";
+export const LIBRARY_ORDERS: readonly LibraryOrder[] = ["year", "added", "studied", "title"];
+export const DEFAULT_ORDER: LibraryOrder = "year";
+
+/** What follows the song's title in its name: the artist, then the year. */
+export function songDetails(video: Video): string[] {
+  return [video.artist, video.year?.toString()].filter((part): part is string => !!part);
+}
+
+/** How the library names a video: the song, the artist, the year ("Passwonky · Fats Waller · 1936"). */
+export function videoName(video: Video): string {
+  return [video.title, ...songDetails(video)].join(" · ");
+}
 
 const VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
 
@@ -36,7 +47,7 @@ export function youtubeId(text: string): string | null {
   return candidate && VIDEO_ID.test(candidate) ? candidate : null;
 }
 
-/** Videos whose title, channel or tags contain `query`, and that carry `tag` if given. */
+/** Videos whose song, artist, year, channel or tags contain `query`, and that carry `tag` if given. */
 export function filterVideos(videos: readonly Video[], query: string, tag: string | null): Video[] {
   const wanted = searchable(query.trim());
   return videos.filter((video) => {
@@ -44,17 +55,30 @@ export function filterVideos(videos: readonly Video[], query: string, tag: strin
       return false;
     }
     if (wanted === "") return true;
-    const haystack = searchable([video.title, video.channel ?? "", ...video.tags].join(" "));
+    const haystack = searchable([videoName(video), video.channel ?? "", ...video.tags].join(" "));
     return wanted.split(/\s+/).every((word) => haystack.includes(word));
   });
 }
 
-/** Newest first, last studied first (never studied last), or by title. */
+/**
+ * Oldest song first (those without a year last, then by artist and title), newest added
+ * first, last studied first (never studied last), or by title.
+ */
 export function sortVideos(videos: readonly Video[], order: LibraryOrder): Video[] {
   const sorted = [...videos];
   const added = (a: Video, b: Video) => b.created_at.localeCompare(a.created_at);
-  if (order === "title") {
-    sorted.sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" }));
+  const text = (a?: string | null, b?: string | null) =>
+    (a ?? "").localeCompare(b ?? "", undefined, { sensitivity: "base" });
+  if (order === "year") {
+    sorted.sort(
+      (a, b) =>
+        (a.year ?? Number.POSITIVE_INFINITY) - (b.year ?? Number.POSITIVE_INFINITY) ||
+        text(a.artist, b.artist) ||
+        text(a.title, b.title) ||
+        added(a, b),
+    );
+  } else if (order === "title") {
+    sorted.sort((a, b) => text(a.title, b.title));
   } else if (order === "studied") {
     sorted.sort((a, b) => (b.studied_at ?? "").localeCompare(a.studied_at ?? "") || added(a, b));
   } else {
@@ -86,4 +110,13 @@ export function parseTags(text: string): string[] {
     .split(",")
     .map((tag) => tag.trim())
     .filter((tag) => tag !== "");
+}
+
+/** The year typed as a song's year: `null` when empty, `undefined` when not a year. */
+export function parseYear(text: string): number | null | undefined {
+  const trimmed = text.trim();
+  if (trimmed === "") return null;
+  if (!/^\d{1,4}$/.test(trimmed)) return undefined;
+  const year = Number(trimmed);
+  return year >= 1 ? year : undefined;
 }

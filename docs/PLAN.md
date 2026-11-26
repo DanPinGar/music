@@ -229,7 +229,8 @@ Configuration and adapters change (PostgreSQL repositories, S3 storage, external
 - Drag-and-drop import of local files (MP4, MKV, WebM, MOV) and also **MIDI or MusicXML**, to attach exact notes to a video without transcribing.
 - After a download or import, the video is **prepared for navigation** in the background ([§4.2](#media-prepared-for-instant-seeking)); it can be played straight away while that runs.
 - Background queue with progress by stage (waiting, reading the details, downloading, finishing), cancellation (deleting a video stops its download and removes its files) and retries. Downloads interrupted by closing the app start again on the next launch. The app reminds users that they are responsible for how they use downloads.
-- The library searches titles, channels and tags (ignoring case and accents), filters by tag, and sorts by date added, last studied or title. Each card shows how far the video was studied (a bar on the thumbnail and "continue at"), and its menu renames, tags and deletes it.
+- Each video names the song it plays: title, artist and the year the song or its album was published, shown as "song · artist · year". They are guessed from the video's title ("Artist - Song 1936 (Piano Tutorial)", "Song - Genre // ARTIST"), or taken from YouTube's music details when it has them; the upload date is never taken for the year. Libraries made before this get them guessed once, at the next start. The card's menu edits all three.
+- The library searches songs, artists, years, channels and tags (ignoring case and accents), filters by tag, and sorts by year published (oldest first, songs without a year last; the default), date added, last studied or title. Each card shows how far the video was studied (a bar on the thumbnail and "continue at"), and its menu edits the song's details and tags, or deletes the video.
 
 ### 4.2 Song navigation (top priority)
 

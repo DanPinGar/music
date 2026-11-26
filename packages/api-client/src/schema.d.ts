@@ -148,7 +148,7 @@ export interface paths {
         delete: operations["delete_video"];
         options?: never;
         head?: never;
-        /** Renames a video or replaces its tags. */
+        /** Changes a video's song (title, artist, year) or replaces its tags. */
         patch: operations["edit_video"];
         trace?: never;
     };
@@ -614,14 +614,21 @@ export interface components {
             managed: boolean;
             tools: components["schemas"]["ToolDto"][];
         };
-        /** @description Changes to a video: each field only when given. */
+        /** @description Changes to a video: each field only when given; `null` clears the artist or the year. */
         VideoChangesDto: {
+            artist?: string | null;
             /** @description Replaces all the video's tags. */
             tags?: string[] | null;
+            /** @description The song's title. */
             title?: string | null;
+            /** Format: int32 */
+            year?: number | null;
         };
         /** @description A video in the library. */
         VideoDto: {
+            /** @description Who wrote or plays the song. */
+            artist?: string | null;
+            /** @description The YouTube channel the video comes from. */
             channel?: string | null;
             /** Format: date-time */
             created_at: string;
@@ -661,11 +668,17 @@ export interface components {
             studied_at?: string | null;
             tags: string[];
             thumbnails?: null | components["schemas"]["ThumbnailsDto"];
+            /** @description The song's title. */
             title: string;
             /** Format: date-time */
             updated_at: string;
             /** Format: int32 */
             width?: number | null;
+            /**
+             * Format: int32
+             * @description The year the song (or its album) was published.
+             */
+            year?: number | null;
         };
         /**
          * @description Where a video came from.
@@ -1062,7 +1075,7 @@ export interface operations {
                     "application/json": components["schemas"]["VideoDto"];
                 };
             };
-            /** @description An empty title, or too many or too long tags */
+            /** @description An empty title, a year out of range, or too many or too long tags */
             400: {
                 headers: {
                     [name: string]: unknown;

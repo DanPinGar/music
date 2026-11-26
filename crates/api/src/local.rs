@@ -48,6 +48,16 @@ pub async fn local_state(library_dir: &Path, tools: ToolsSetup) -> anyhow::Resul
     let mut roots = tools.roots.clone();
     roots.extend(tools.managed.clone());
 
+    // Libraries made before videos had an artist and a year get them guessed, once.
+    if store.pending("guess_songs").await? {
+        let filled = segno_domain::library::guess_missing_songs(&store).await?;
+        tracing::info!(
+            filled,
+            "guessed the artist and year of the videos in the library"
+        );
+        store.done("guess_songs").await?;
+    }
+
     let system = Arc::new(SystemInfo {
         version: env!("CARGO_PKG_VERSION").into(),
         library_id: store.library_id().await?,

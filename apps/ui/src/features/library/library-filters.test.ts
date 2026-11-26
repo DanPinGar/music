@@ -4,8 +4,10 @@ import {
   allTags,
   filterVideos,
   parseTags,
+  parseYear,
   sortVideos,
   studyProgress,
+  videoName,
   youtubeId,
 } from "./library-filters";
 
@@ -27,7 +29,9 @@ function video(overrides: Partial<Video>): Video {
 
 const MONK = video({
   id: "monk",
-  title: "Thelonious Monk - I'm Confessin'",
+  title: "I'm Confessin'",
+  artist: "Thelonious Monk",
+  year: 1965,
   channel: "itsRemco",
   tags: ["Jazz", "To learn"],
   created_at: "2026-11-25T10:00:00Z",
@@ -37,7 +41,9 @@ const MONK = video({
 });
 const CHOPIN = video({
   id: "chopin",
-  title: "Chopin - Nocturne Op. 9 Nº 2",
+  title: "Nocturne Op. 9 Nº 2",
+  artist: "Chopin",
+  year: 1832,
   tags: ["Clásica"],
   created_at: "2026-11-26T10:00:00Z",
 });
@@ -94,11 +100,46 @@ describe("filterVideos", () => {
 });
 
 describe("sortVideos", () => {
-  it("sorts by date added, last studied or title", () => {
+  it("sorts by year, date added, last studied or title", () => {
     const all = [MONK, CHOPIN, BACH];
+    expect(sortVideos(all, "year").map((v) => v.id)).toEqual(["chopin", "monk", "bach"]);
     expect(sortVideos(all, "added").map((v) => v.id)).toEqual(["chopin", "monk", "bach"]);
     expect(sortVideos(all, "studied").map((v) => v.id)).toEqual(["bach", "monk", "chopin"]);
-    expect(sortVideos(all, "title").map((v) => v.id)).toEqual(["bach", "chopin", "monk"]);
+    expect(sortVideos(all, "title").map((v) => v.id)).toEqual(["bach", "monk", "chopin"]);
+  });
+
+  it("puts songs of the same year by artist, and those without a year last", () => {
+    const waller = video({ id: "waller", title: "Passwonky", artist: "Fats Waller", year: 1936 });
+    const ellington = video({ id: "ellington", title: "Caravan", artist: "Ellington", year: 1936 });
+    const unknown = video({ id: "unknown", title: "Another song" });
+    expect(sortVideos([unknown, waller, ellington], "year").map((v) => v.id)).toEqual([
+      "ellington",
+      "waller",
+      "unknown",
+    ]);
+  });
+});
+
+describe("videoName", () => {
+  it("is the song, then its artist and year, when known", () => {
+    expect(videoName(MONK)).toBe("I'm Confessin' · Thelonious Monk · 1965");
+    expect(videoName(BACH)).toBe("bach - Prelude in C");
+    expect(videoName(video({ title: "Clair de Lune", year: 1905 }))).toBe("Clair de Lune · 1905");
+  });
+
+  it("is what the search looks in", () => {
+    expect(filterVideos([MONK, CHOPIN, BACH], "thelonious 1965", null).map((v) => v.id)).toEqual([
+      "monk",
+    ]);
+  });
+});
+
+describe("parseYear", () => {
+  it("reads a year, or nothing", () => {
+    expect(parseYear(" 1936 ")).toBe(1936);
+    expect(parseYear("")).toBeNull();
+    for (const wrong of ["0", "19365", "1936a", "-5"])
+      expect(parseYear(wrong), wrong).toBeUndefined();
   });
 });
 

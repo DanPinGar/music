@@ -16,7 +16,7 @@ import {
 import { formatDuration } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { DownloadStatus } from "./download-status";
-import { studyProgress } from "./library-filters";
+import { songDetails, studyProgress } from "./library-filters";
 import { PreparationStatus } from "./preparation-status";
 import { useLibraryActions } from "./use-library-actions";
 import { DeleteVideoDialog, EditVideoDialog } from "./video-dialogs";
@@ -74,7 +74,7 @@ export function VideoCard({
       </div>
       <CardHeader className="pt-4">
         <div className="flex items-start gap-1">
-          <CardTitle className="line-clamp-2 flex-1">
+          <CardTitle className="line-clamp-2 flex-1" data-testid="video-name">
             {ready ? (
               <Link
                 to="/videos/$videoId"
@@ -82,10 +82,10 @@ export function VideoCard({
                 // The whole card opens the video.
                 className="outline-none after:absolute after:inset-0"
               >
-                {video.title}
+                <VideoName video={video} />
               </Link>
             ) : (
-              video.title
+              <VideoName video={video} />
             )}
           </CardTitle>
           <VideoMenu video={video} />
@@ -146,7 +146,22 @@ export function VideoCard({
   );
 }
 
-/** "···": rename, tag or delete the video. */
+/** The song, then its artist and year, quieter: "Passwonky · Fats Waller · 1936". */
+function VideoName({ video }: { video: Video }) {
+  return (
+    <>
+      {video.title}
+      {songDetails(video).map((detail) => (
+        <span key={detail} className="font-normal text-muted-foreground">
+          {" · "}
+          {detail}
+        </span>
+      ))}
+    </>
+  );
+}
+
+/** "···": edit the song's details and tags, or delete the video. */
 function VideoMenu({ video }: { video: Video }) {
   const { t } = useTranslation();
   const [editing, setEditing] = useState(false);

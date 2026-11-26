@@ -6,11 +6,12 @@ use chrono::Utc;
 
 use crate::{
     DomainError, MediaPreparer, MediaProbe, MediaStore, PreparationInput, Result, ThumbnailSprite,
-    Video, VideoId, VideoRepository, VideoSource, VideoStatus,
+    Video, VideoId, VideoRepository, VideoSource, VideoStatus, guess_song,
 };
 
 /// Imports a video file from this computer: checks that it is a readable video, places it in
-/// the library and records it, ready to play.
+/// the library and records it, ready to play. Without a `title`, the song's title, artist and
+/// year are guessed from the file name ("Chopin - Nocturne Op. 9 No. 2.mp4").
 pub async fn import_local_video(
     videos: &dyn VideoRepository,
     probe: &dyn MediaProbe,
@@ -37,6 +38,9 @@ pub async fn import_local_video(
         .and_then(|stem| stem.to_str())
         .unwrap_or("video");
     let mut video = Video::new_importing(VideoSource::File, title.unwrap_or(default_title), None)?;
+    if title.is_none() {
+        video.apply_song(guess_song(default_title));
+    }
     video.apply_media_info(&info);
     video.media_file = Some(store.store_original(video.id, file).await?);
     video.status = VideoStatus::Ready;
@@ -47,6 +51,25 @@ pub async fn import_local_video(
         return Err(err);
     }
     Ok(video)
+}
+
+/// Guesses the song's artist and year from the title of the videos that have neither, once
+/// for libraries made before videos had them. Returns how many videos it filled in.
+pub async fn guess_missing_songs(videos: &dyn VideoRepository) -> Result<usize> {
+    let mut filled = 0;
+    for mut video in videos.list().await? {
+        if video.artist.is_some() || video.year.is_some() {
+            continue;
+        }
+        let song = guess_song(&video.title);
+        if song.artist.is_none() && song.year.is_none() {
+            continue;
+        }
+        video.apply_song(song);
+        videos.update(&video).await?;
+        filled += 1;
+    }
+    Ok(filled)
 }
 
 /// The steps of preparing a video for navigation, in the order they run.
@@ -178,7 +201,9 @@ mod tests {
 
         assert_eq!(video.status, VideoStatus::Ready);
         assert_eq!(video.source, VideoSource::File);
-        assert!(video.title.starts_with("Monk - Confessin"));
+        // The song comes from the file name ("Monk - Confessin<random>.mp4").
+        assert!(video.title.starts_with("Confessin"));
+        assert_eq!(video.artist.as_deref(), Some("Monk"));
         assert_eq!(video.duration_ms, Some(141_154));
         assert_eq!(video.fps, Some(60.0));
         assert_eq!(
@@ -186,6 +211,37 @@ mod tests {
             Some(format!("media/{}/original.mp4", video.id).as_str())
         );
         assert_eq!(videos.list().await.unwrap(), vec![video]);
+    }
+
+    #[tokio::test]
+    async fn guesses_the_missing_songs_once_without_touching_the_others() {
+        let videos = Videos::default();
+        let mut old = Video::new_importing(
+            VideoSource::Youtube,
+            "Thelonious Monk - Dinah 1965 [Stride Piano Synthesia]",
+            None,
+        )
+        .unwrap();
+        old.status = VideoStatus::Ready;
+        let mut edited = Video::new_importing(VideoSource::File, "Nocturne - Live", None).unwrap();
+        edited.year = Some(1830);
+        let plain = Video::new_importing(VideoSource::File, "clip", None).unwrap();
+        for video in [&old, &edited, &plain] {
+            videos.insert(video).await.unwrap();
+        }
+
+        assert_eq!(guess_missing_songs(&videos).await.unwrap(), 1);
+        let old = videos.get(old.id).await.unwrap();
+        assert_eq!(
+            (old.title.as_str(), old.artist.as_deref(), old.year),
+            ("Dinah", Some("Thelonious Monk"), Some(1965))
+        );
+        assert_eq!(
+            videos.get(edited.id).await.unwrap().title,
+            "Nocturne - Live"
+        );
+        assert_eq!(videos.get(plain.id).await.unwrap().title, "clip");
+        assert_eq!(guess_missing_songs(&videos).await.unwrap(), 0);
     }
 
     #[tokio::test]

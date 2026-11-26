@@ -7,9 +7,13 @@ import { toast } from "sonner";
 import { useApi } from "@/api/api-context";
 import { useSystemInfo } from "@/api/use-system-info";
 import { forgetLastVideo, lastVideoId } from "@/features/player/last-video";
+import { videoName } from "./library-filters";
 
+/** Changes to a video: each field only when given; `null` clears the artist or the year. */
 export interface VideoChanges {
   readonly title?: string;
+  readonly artist?: string | null;
+  readonly year?: number | null;
   readonly tags?: string[];
 }
 
@@ -38,7 +42,7 @@ export function useLibraryActions() {
           const result = await api.POST("/videos/download", { body: { url } });
           const video = expectData(result);
           if (result.response.status === 200) {
-            toast(t("library.downloadExists", { title: video.title }));
+            toast(t("library.downloadExists", { title: videoName(video) }));
           } else {
             toast.success(t("library.downloadQueued"));
           }
@@ -67,7 +71,7 @@ export function useLibraryActions() {
           return;
         }
         if (library && lastVideoId(library) === video.id) forgetLastVideo(library);
-        toast(t("library.deleted", { title: video.title }));
+        toast(t("library.deleted", { title: videoName(video) }));
         await refresh();
       },
       edit: async (video: Video, changes: VideoChanges) => {

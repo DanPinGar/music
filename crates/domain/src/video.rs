@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{DomainError, MediaInfo, Result};
+use crate::{DomainError, MediaInfo, Result, SongDetails};
 
 /// Identifier of a video in the library.
 ///
@@ -126,7 +126,13 @@ pub struct Video {
     pub id: VideoId,
     pub source: VideoSource,
     pub source_url: Option<String>,
+    /// The song's title: what the library shows first.
     pub title: String,
+    /// Who wrote or plays the song.
+    pub artist: Option<String>,
+    /// The year the song (or its album) was published: the library is sorted by it.
+    pub year: Option<i32>,
+    /// The YouTube channel the video comes from.
     pub channel: Option<String>,
     pub duration_ms: Option<i64>,
     pub fps: Option<f64>,
@@ -156,6 +162,17 @@ pub struct Video {
 const MAX_TAGS: usize = 20;
 const MAX_TAG_CHARS: usize = 40;
 const MAX_TITLE_CHARS: usize = 300;
+const MAX_ARTIST_CHARS: usize = 200;
+const YEARS: std::ops::RangeInclusive<i32> = 1..=9999;
+
+/// Changes to a video's details: each field only when given; `Some(None)` clears it.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct VideoChanges<'a> {
+    pub title: Option<&'a str>,
+    pub artist: Option<Option<&'a str>>,
+    pub year: Option<Option<i32>>,
+    pub tags: Option<&'a [String]>,
+}
 
 /// Tags trimmed, without empty ones or repeats (ignoring case), in the order given.
 pub fn clean_tags(tags: &[String]) -> Result<Vec<String>> {
@@ -191,22 +208,78 @@ impl Video {
                 || self.attacks_file.is_none())
     }
 
-    /// Renames the video and replaces its tags (each only when given).
-    pub fn edit(&mut self, title: Option<&str>, tags: Option<&[String]>) -> Result<()> {
+    /// Changes the song's title, artist and year and replaces the tags, each only when given.
+    /// Nothing changes if any of them is not valid.
+    pub fn edit(&mut self, changes: VideoChanges<'_>) -> Result<()> {
+        let title = changes
+            .title
+            .map(|title| {
+                let title = title.trim();
+                if title.is_empty() || title.chars().count() > MAX_TITLE_CHARS {
+                    return Err(DomainError::Invalid(format!(
+                        "a title has between 1 and {MAX_TITLE_CHARS} characters"
+                    )));
+                }
+                Ok(title.to_owned())
+            })
+            .transpose()?;
+        let artist = changes
+            .artist
+            .map(|artist| {
+                let artist = artist.map(str::trim).filter(|artist| !artist.is_empty());
+                if artist.is_some_and(|artist| artist.chars().count() > MAX_ARTIST_CHARS) {
+                    return Err(DomainError::Invalid(format!(
+                        "an artist has at most {MAX_ARTIST_CHARS} characters"
+                    )));
+                }
+                Ok(artist.map(str::to_owned))
+            })
+            .transpose()?;
+        if let Some(Some(year)) = changes.year
+            && !YEARS.contains(&year)
+        {
+            return Err(DomainError::Invalid(format!(
+                "a year is between {} and {}",
+                YEARS.start(),
+                YEARS.end()
+            )));
+        }
+        let tags = changes.tags.map(clean_tags).transpose()?;
+
         if let Some(title) = title {
-            let title = title.trim();
-            if title.is_empty() || title.chars().count() > MAX_TITLE_CHARS {
-                return Err(DomainError::Invalid(format!(
-                    "a title has between 1 and {MAX_TITLE_CHARS} characters"
-                )));
-            }
-            self.title = title.to_owned();
+            self.title = title;
+        }
+        if let Some(artist) = artist {
+            self.artist = artist;
+        }
+        if let Some(year) = changes.year {
+            self.year = year;
         }
         if let Some(tags) = tags {
-            self.tags = clean_tags(tags)?;
+            self.tags = tags;
         }
         self.updated_at = Utc::now();
         Ok(())
+    }
+
+    /// Takes the song's title, artist and year from `song` (an empty title is not taken).
+    pub fn apply_song(&mut self, song: SongDetails) {
+        let title = song.title.trim();
+        if !title.is_empty() {
+            self.title = title.chars().take(MAX_TITLE_CHARS).collect();
+        }
+        self.artist = song
+            .artist
+            .map(|artist| {
+                artist
+                    .trim()
+                    .chars()
+                    .take(MAX_ARTIST_CHARS)
+                    .collect::<String>()
+            })
+            .filter(|artist| !artist.is_empty());
+        self.year = song.year.filter(|year| YEARS.contains(year));
+        self.updated_at = Utc::now();
     }
 
     /// Copies the technical facts of the media into the entry.
@@ -234,6 +307,8 @@ impl Video {
             source,
             source_url,
             title: title.to_owned(),
+            artist: None,
+            year: None,
             channel: None,
             duration_ms: None,
             fps: None,
@@ -303,16 +378,58 @@ mod tests {
     #[test]
     fn videos_are_renamed_and_tagged() {
         let mut video = Video::new_importing(VideoSource::File, "clip", None).unwrap();
+        let tags = ["Ballad".to_owned()];
         video
-            .edit(Some("  Monk  "), Some(&["Ballad".to_owned()]))
+            .edit(VideoChanges {
+                title: Some("  Dinah  "),
+                artist: Some(Some(" Thelonious Monk ")),
+                year: Some(Some(1965)),
+                tags: Some(&tags),
+            })
             .unwrap();
         assert_eq!(
-            (video.title.as_str(), video.tags.as_slice()),
-            ("Monk", ["Ballad".to_owned()].as_slice())
+            (
+                video.title.as_str(),
+                video.artist.as_deref(),
+                video.year,
+                video.tags.as_slice()
+            ),
+            (
+                "Dinah",
+                Some("Thelonious Monk"),
+                Some(1965),
+                tags.as_slice()
+            )
         );
-        video.edit(None, None).unwrap();
-        assert_eq!(video.title, "Monk");
-        assert!(video.edit(Some("  "), None).is_err());
+
+        video.edit(VideoChanges::default()).unwrap();
+        assert_eq!(
+            (video.title.as_str(), video.artist.as_deref()),
+            ("Dinah", Some("Thelonious Monk"))
+        );
+        video
+            .edit(VideoChanges {
+                artist: Some(Some("  ")),
+                year: Some(None),
+                ..VideoChanges::default()
+            })
+            .unwrap();
+        assert_eq!((video.artist.as_deref(), video.year), (None, None));
+
+        for wrong in [
+            VideoChanges {
+                title: Some("  "),
+                ..VideoChanges::default()
+            },
+            VideoChanges {
+                title: Some("Kept?"),
+                year: Some(Some(12_000)),
+                ..VideoChanges::default()
+            },
+        ] {
+            assert!(video.edit(wrong).is_err());
+        }
+        assert_eq!(video.title, "Dinah", "a refused edit changes nothing");
     }
 
     #[test]
