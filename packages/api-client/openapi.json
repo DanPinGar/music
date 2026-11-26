@@ -284,6 +284,290 @@
         ]
       }
     },
+    "/videos/{id}/markers": {
+      "get": {
+        "tags": [
+          "study"
+        ],
+        "summary": "The video's markers, in time order.",
+        "operationId": "list_markers",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Video id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The markers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MarkerDto"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such video",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "token": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "study"
+        ],
+        "summary": "Adds a marker to the video.",
+        "operationId": "create_marker",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Video id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewMarkerDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The new marker",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarkerDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not a valid marker",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such video",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "token": []
+          }
+        ]
+      }
+    },
+    "/videos/{id}/markers/{marker_id}": {
+      "put": {
+        "tags": [
+          "study"
+        ],
+        "summary": "Moves, renames or recolours a marker.",
+        "operationId": "update_marker",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Video id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "marker_id",
+            "in": "path",
+            "description": "Marker id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkerChangesDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The marker as saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarkerDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not a valid marker",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such video or marker",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "token": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "study"
+        ],
+        "summary": "Deletes a marker.",
+        "operationId": "delete_marker",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Video id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "marker_id",
+            "in": "path",
+            "description": "Marker id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such video or marker",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "token": []
+          }
+        ]
+      }
+    },
     "/videos/{id}/media": {
       "get": {
         "tags": [
@@ -396,6 +680,140 @@
         ]
       }
     },
+    "/videos/{id}/state": {
+      "get": {
+        "tags": [
+          "study"
+        ],
+        "summary": "Where the user left the video; the defaults for a video never opened.",
+        "operationId": "get_state",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Video id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The video's study state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoStateDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such video",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "token": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "study"
+        ],
+        "summary": "Saves where the user is in the video (the whole document).",
+        "operationId": "put_state",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Video id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VideoStateDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The state as saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoStateDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The state makes no sense (e.g. a loop ending before it starts)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such video",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "token": []
+          }
+        ]
+      }
+    },
     "/videos/{id}/thumbnails": {
       "get": {
         "tags": [
@@ -482,6 +900,35 @@
           }
         }
       },
+      "BeatGridDto": {
+        "type": "object",
+        "description": "Beats tapped by the user. Before the first and after the last, the grid continues at the\ntempo of its ends.",
+        "required": [
+          "beats_ms",
+          "beats_per_bar",
+          "downbeat"
+        ],
+        "properties": {
+          "beats_ms": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Times of the beats, strictly increasing."
+          },
+          "beats_per_bar": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "downbeat": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Index of a beat that starts bar 1 (it may lie outside `beats_ms`)."
+          }
+        }
+      },
       "Health": {
         "type": "object",
         "description": "Result of the liveness probe.",
@@ -515,6 +962,150 @@
           }
         }
       },
+      "LoopRangeDto": {
+        "type": "object",
+        "required": [
+          "start_ms",
+          "end_ms",
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "end_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "start_ms": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "MarkerChangesDto": {
+        "type": "object",
+        "description": "Every editable field of a marker (its kind cannot change).",
+        "required": [
+          "start_ms"
+        ],
+        "properties": {
+          "color": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "end_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "label": {
+            "type": "string"
+          },
+          "start_ms": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "MarkerDto": {
+        "type": "object",
+        "description": "A marker on a video's timeline.",
+        "required": [
+          "id",
+          "kind",
+          "start_ms",
+          "label",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "color": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`#rrggbb`; absent for the default colour."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "end_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "End of a section or loop; absent for points."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/MarkerKindDto"
+          },
+          "label": {
+            "type": "string",
+            "description": "May be empty: the UI then shows the marker's number."
+          },
+          "start_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MarkerKindDto": {
+        "type": "string",
+        "description": "A point to start from, a named section or a saved loop.",
+        "enum": [
+          "point",
+          "section",
+          "loop"
+        ]
+      },
+      "NewMarkerDto": {
+        "type": "object",
+        "description": "A new marker.",
+        "required": [
+          "kind",
+          "start_ms"
+        ],
+        "properties": {
+          "color": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "end_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/MarkerKindDto"
+          },
+          "label": {
+            "type": "string"
+          },
+          "start_ms": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
       "PeaksDto": {
         "type": "object",
         "description": "The audio waveform of a video, served by `/peaks`.",
@@ -542,6 +1133,36 @@
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          }
+        }
+      },
+      "PracticeDto": {
+        "type": "object",
+        "description": "How loops are practised.",
+        "required": [
+          "pre_roll_beats",
+          "count_in"
+        ],
+        "properties": {
+          "count_in": {
+            "type": "boolean",
+            "description": "A bar of metronome clicks before playback starts."
+          },
+          "pre_roll_beats": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Beats played before the loop start on every repetition.",
+            "minimum": 0
+          },
+          "trainer": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SpeedTrainerDto"
+              }
+            ]
           }
         }
       },
@@ -605,6 +1226,38 @@
             "description": "URI identifying the problem type; `about:blank` when the status code says it all."
           }
         }
+      },
+      "SpeedTrainerDto": {
+        "type": "object",
+        "description": "Speeds the loop up on every repetition: `from`, then `step` more each time, up to `to`.",
+        "required": [
+          "from",
+          "step",
+          "to"
+        ],
+        "properties": {
+          "from": {
+            "type": "number",
+            "format": "double"
+          },
+          "step": {
+            "type": "number",
+            "format": "double"
+          },
+          "to": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "StepUnitDto": {
+        "type": "string",
+        "description": "What the arrow keys step by.",
+        "enum": [
+          "seconds",
+          "beat",
+          "bar"
+        ]
       },
       "SystemInfo": {
         "type": "object",
@@ -685,6 +1338,23 @@
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          }
+        }
+      },
+      "TimelineViewDto": {
+        "type": "object",
+        "required": [
+          "start_ms",
+          "span_ms"
+        ],
+        "properties": {
+          "span_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "start_ms": {
+            "type": "integer",
+            "format": "int64"
           }
         }
       },
@@ -818,6 +1488,64 @@
           "file"
         ]
       },
+      "VideoStateDto": {
+        "type": "object",
+        "description": "Where the user left a video, so it reopens the same way.",
+        "required": [
+          "position_ms",
+          "speed",
+          "step_unit",
+          "practice"
+        ],
+        "properties": {
+          "beat_grid": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/BeatGridDto"
+              }
+            ]
+          },
+          "loop": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LoopRangeDto"
+              }
+            ]
+          },
+          "position_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "practice": {
+            "$ref": "#/components/schemas/PracticeDto"
+          },
+          "speed": {
+            "type": "number",
+            "format": "double",
+            "description": "Playback rate, from 0.25 to 2 (1 is normal speed)."
+          },
+          "step_unit": {
+            "$ref": "#/components/schemas/StepUnitDto"
+          },
+          "view": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TimelineViewDto",
+                "description": "The stretch the detail timeline showed."
+              }
+            ]
+          }
+        }
+      },
       "VideoStatusDto": {
         "type": "string",
         "description": "Lifecycle of a library entry.",
@@ -843,6 +1571,10 @@
     {
       "name": "videos",
       "description": "Videos in the library"
+    },
+    {
+      "name": "study",
+      "description": "Where the user left each video, and its markers"
     }
   ]
 }

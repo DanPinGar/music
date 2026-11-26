@@ -11,8 +11,8 @@ use axum::http::header::{AUTHORIZATION, CONTENT_RANGE, CONTENT_TYPE, HOST, RANGE
 use axum::http::{HeaderMap, Request, StatusCode};
 use segno_api::{AppState, Preparations, SecurityConfig, SystemInfo};
 use segno_domain::{
-    MediaInfo, MediaPreparer, MediaProbe, MediaStore, PreparationInput, ThumbnailSprite, Video,
-    VideoRepository, VideoSource,
+    MarkerRepository, MediaInfo, MediaPreparer, MediaProbe, MediaStore, PreparationInput,
+    ThumbnailSprite, Video, VideoRepository, VideoSource, VideoStateRepository,
 };
 use segno_storage::{LibraryFiles, SqliteStore};
 use serde_json::{Value, json};
@@ -104,6 +104,8 @@ async fn harness_with(probe: Option<Arc<dyn MediaProbe>>, prepare: bool) -> Harn
             ffmpeg_version: None,
         }),
         videos,
+        states: Arc::new(store.clone()) as Arc<dyn VideoStateRepository>,
+        markers: Arc::new(store.clone()) as Arc<dyn MarkerRepository>,
         media_files,
         probe,
         preparations,
@@ -372,6 +374,150 @@ async fn unprepared_videos_have_no_navigation_files_yet() {
     }
 }
 
+fn json_request(method: &str, uri: &str, body: Value) -> Request<Body> {
+    authorized(
+        Request::builder()
+            .method(method)
+            .uri(uri)
+            .header(HOST, format!("127.0.0.1:{PORT}")),
+    )
+    .header(CONTENT_TYPE, "application/json")
+    .body(Body::from(body.to_string()))
+    .unwrap()
+}
+
+async fn stored_video(h: &Harness) -> Video {
+    let video = Video::new_importing(VideoSource::File, "Monk", None).unwrap();
+    h.store.insert(&video).await.unwrap();
+    video
+}
+
+#[tokio::test]
+async fn a_video_never_opened_has_the_default_state() {
+    let h = harness().await;
+    let video = stored_video(&h).await;
+    let (status, _, body) = send(
+        &h.app,
+        empty(authorized(get(&format!("/videos/{}/state", video.id)))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["position_ms"], 0);
+    assert_eq!(body["speed"], 1.0);
+    assert_eq!(body["step_unit"], "seconds");
+}
+
+#[tokio::test]
+async fn the_state_is_saved_whole_and_validated() {
+    let h = harness().await;
+    let video = stored_video(&h).await;
+    let uri = format!("/videos/{}/state", video.id);
+    let state = json!({
+        "position_ms": 30_200,
+        "speed": 0.75,
+        "step_unit": "bar",
+        "view": { "start_ms": 28_000, "span_ms": 10_000 },
+        "beat_grid": { "beats_ms": [500, 1100, 1700], "beats_per_bar": 3, "downbeat": 0 },
+        "loop": { "start_ms": 1000, "end_ms": 9000, "enabled": true },
+        "practice": { "pre_roll_beats": 2, "count_in": true,
+                      "trainer": { "from": 0.6, "step": 0.05, "to": 1.0 } }
+    });
+    let (status, _, saved) = send(&h.app, json_request("PUT", &uri, state.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    let (_, _, loaded) = send(&h.app, empty(authorized(get(&uri)))).await;
+    assert_eq!(loaded, state);
+
+    let mut bad = state;
+    bad["loop"]["end_ms"] = json!(500);
+    let (status, content_type, problem) = send(&h.app, json_request("PUT", &uri, bad)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(content_type.as_deref(), Some("application/problem+json"));
+    assert!(problem["detail"].as_str().unwrap().contains("loop"));
+}
+
+#[tokio::test]
+async fn state_of_an_unknown_video_is_404() {
+    let h = harness().await;
+    let uri = format!("/videos/{}/state", uuid::Uuid::now_v7());
+    let (status, _, _) = send(&h.app, empty(authorized(get(&uri)))).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn markers_are_created_listed_changed_and_deleted() {
+    let h = harness().await;
+    let video = stored_video(&h).await;
+    let markers = format!("/videos/{}/markers", video.id);
+
+    let (status, _, chorus) = send(
+        &h.app,
+        json_request(
+            "POST",
+            &markers,
+            json!({ "kind": "section", "start_ms": 20_000, "end_ms": 45_000, "label": "Chorus" }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{chorus}");
+    let (status, _, point) = send(
+        &h.app,
+        json_request(
+            "POST",
+            &markers,
+            json!({ "kind": "point", "start_ms": 5_000 }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(point["label"], "");
+
+    let (_, _, listed) = send(&h.app, empty(authorized(get(&markers)))).await;
+    let starts: Vec<i64> = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["start_ms"].as_i64().unwrap())
+        .collect();
+    assert_eq!(starts, [5_000, 20_000]);
+
+    let one = format!("{markers}/{}", chorus["id"].as_str().unwrap());
+    let (status, _, changed) = send(
+        &h.app,
+        json_request(
+            "PUT",
+            &one,
+            json!({ "start_ms": 21_000, "end_ms": 46_000, "label": "Coro", "color": "#22AA88" }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{changed}");
+    assert_eq!(changed["label"], "Coro");
+    assert_eq!(changed["color"], "#22aa88");
+    assert_eq!(changed["kind"], "section");
+
+    let delete = authorized(Request::delete(&one).header(HOST, format!("127.0.0.1:{PORT}")));
+    let (status, _, _) = raw(&h.app, empty(delete)).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, _, listed) = send(&h.app, empty(authorized(get(&markers)))).await;
+    assert_eq!(listed.as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn invalid_markers_are_400_problems() {
+    let h = harness().await;
+    let video = stored_video(&h).await;
+    let markers = format!("/videos/{}/markers", video.id);
+    for body in [
+        json!({ "kind": "point", "start_ms": 5_000, "end_ms": 6_000 }),
+        json!({ "kind": "loop", "start_ms": 5_000 }),
+        json!({ "kind": "section", "start_ms": 5_000, "end_ms": 4_000 }),
+        json!({ "kind": "point", "start_ms": 5_000, "color": "red" }),
+    ] {
+        let (status, _, problem) = send(&h.app, json_request("POST", &markers, body)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
+    }
+}
+
 #[test]
 fn the_openapi_document_describes_every_route() {
     let doc = serde_json::to_value(segno_api::openapi()).unwrap();
@@ -386,6 +532,9 @@ fn the_openapi_document_describes_every_route() {
         "/videos/{id}/thumbnails",
         "/videos/{id}/peaks",
         "/videos/{id}/attacks",
+        "/videos/{id}/state",
+        "/videos/{id}/markers",
+        "/videos/{id}/markers/{marker_id}",
     ] {
         assert!(paths.contains_key(path), "missing {path}");
     }

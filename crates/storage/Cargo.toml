@@ -11,6 +11,7 @@ publish.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
 segno-domain.workspace = true
+serde_json.workspace = true
 sqlx.workspace = true
 tokio.workspace = true
 

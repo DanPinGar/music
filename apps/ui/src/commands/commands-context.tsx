@@ -36,7 +36,10 @@ export function useCommands(commands: readonly Command[]): void {
   useEffect(() => registry.registerAll(commands), [registry, commands]);
 }
 
-/** Runs the command bound to each key press, except while the user is typing. */
+/**
+ * Runs the command bound to each key press, except while the user is typing or a dialog is
+ * open (or still opening or closing: keys typed then belong to the dialog, not the player).
+ */
 export function useGlobalShortcuts(): void {
   const registry = useCommandRegistry();
   useEffect(() => {
@@ -44,11 +47,11 @@ export function useGlobalShortcuts(): void {
       if (event.defaultPrevented || event.isComposing) return;
       const binding = bindingFromEvent(event);
       if (!binding) return;
-      if (binding !== "Escape" && isTypingTarget(event.target)) return;
+      if (binding !== "Escape" && (isTypingTarget(event.target) || dialogOpen())) return;
       const command = registry.findByBinding(binding);
       if (!command) return;
       event.preventDefault();
-      command.run();
+      command.run({ binding });
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -56,6 +59,10 @@ export function useGlobalShortcuts(): void {
 }
 
 const NON_TEXT_INPUTS = new Set(["button", "checkbox", "radio", "range", "reset", "submit"]);
+
+function dialogOpen(): boolean {
+  return document.querySelector("[data-slot=dialog-content]") !== null;
+}
 
 function isTypingTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;

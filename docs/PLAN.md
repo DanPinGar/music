@@ -74,7 +74,7 @@ Desktop app (Tauri 2)
 - **React + TypeScript + Vite.** Routing with TanStack Router, server data with TanStack Query and local player state with Zustand.
 - **Design:** Tailwind + shadcn/ui (accessible components built on Base UI), dark theme by default, i18n with i18next (Spanish and English).
 - **Video:** native `<video>` element with custom controls. `requestVideoFrameCallback` keeps the timeline, piano roll, score and synthesiser in sync with frame accuracy.
-- **Timeline:** custom WebGL component with an overview and a zoomable detail view ([§4.2](#timeline)).
+- **Timeline:** custom component drawn on Canvas 2D (WebGL only if it ever falls short) with an overview and a zoomable detail view ([§4.2](#timeline)).
 - **Piano roll:** WebGL with PixiJS (thousands of notes at 60 fps, with editing).
 - **Score:** Verovio (WebAssembly) in a Web Worker renders MusicXML to SVG; its _timemap_ highlights the sounding notes and lets a click on a note jump the video there.
 - **Audio:** Web Audio, with a sampled piano (Tone.js or smplr) for MIDI playback.
@@ -120,7 +120,7 @@ GET              /videos/{id}/thumbnails thumbnail sprite, one tile a second
 GET              /videos/{id}/peaks      waveform peaks
 GET              /videos/{id}/attacks    attacks (note onsets) found in the audio
 GET  PUT         /videos/{id}/state      remembered position, speed, loop, zoom, beat grid
-CRUD             /videos/{id}/markers
+CRUD             /videos/{id}/markers    (PUT replaces a marker's editable fields)
 CRUD             /videos/{id}/comments
 POST             /videos/{id}/pipelines  start transcription, score or analysis
 GET  POST        /videos/{id}/notes      note-set revisions (editor)
@@ -173,7 +173,7 @@ Library/
 | Table                               | Key fields                                                                                     |
 | ----------------------------------- | ---------------------------------------------------------------------------------------------- |
 | `videos`                            | id, source (youtube/file), source_url, title, channel, duration_ms, fps, width, height, status |
-| `video_state`                       | video_id, position_ms, speed, loop, step_unit, zoom, layout (to resume where you left off)     |
+| `video_states`                      | video_id, state (JSON: position, speed, step unit, zoom, beat grid, loop, practice)            |
 | `tags`, `video_tags`, `collections` | library organisation                                                                           |
 | `markers`                           | id, video_id, kind (point/section/loop), start_ms, end_ms, label, color                        |
 | `comments`                          | id, video_id, start_ms, end_ms, anchor (moment/bar/note), body_md                              |
@@ -295,7 +295,11 @@ Built on 26 November 2026:
 - The detail view zooms from half a second to the whole song (`Ctrl` + wheel, `Ctrl` `+`/`-`/`0`) and follows playback by page, continuously or not at all. The mode and the zoom are remembered. A manual pan pauses following until the next jump or play, and jumps always bring the playhead into view.
 - Click jumps and drag scrubs, silently for now. Hovering the overview shows that second's thumbnail. Hovering the detail view shows the exact frame, from a second hidden video that only runs the latest seek.
 - With the timeline running, jumps and frame steps on the Monk video stay within the budget (p95 26–47 ms and 26–38 ms).
-- Still to come: sections, markers, loop and comments on the overview, the beat grid, audible scrubbing and snapping.
+- Since then, also built:
+  - the beat grid (bar lines and numbers), sections as coloured bands, numbered markers and the loop, on both levels;
+  - **Shift + drag** makes a loop; loop edges and markers drag, snapping to beats, attacks and markers (`Alt` for no snapping);
+  - a **double-click** adds a marker.
+- Still to come: comments on the overview, audible scrubbing, and the right-click menu (the markers panel does its job for now).
 
 #### Keyboard
 
@@ -324,6 +328,20 @@ All shortcuts are configurable and none needs AltGr on a Spanish keyboard. The s
 
 `Esc` always returns focus to the player, for example after typing a comment.
 
+Built on 26 November 2026: every key in the table except `C` (comments come next). Also:
+
+- `Shift + R` removes the loop.
+- `1`–`9` count points and sections in time order.
+- `G` also takes a frame (`f740`) and Spanish bar names (`c32`, `compás 32`).
+- History keeps one entry per jump of 4 s or more, and a burst of seeks (scrubbing, a held key) is one jump.
+- Shortcuts wait while a dialog is open or closing, so keys typed into it never reach the player.
+
+The beat grid is built from the taps:
+
+- A run of taps on `T` replaces the grid's beats where it was tapped, so a rubato performance keeps its own grid. Beyond the tapped beats the grid continues at the tempo of its ends.
+- Taps within 70 ms of an attack move onto it, which removes the wobble of human taps.
+- The first tap starts bar 1; "start a bar on this beat" and the beats per bar fix the bar lines afterwards.
+
 #### Every view is a navigation surface
 
 Clicking a note in the piano roll, a note or bar in the score, a chord in the harmony lane, a comment or a marker jumps there; selecting a range in any of them creates a loop.
@@ -333,6 +351,17 @@ Clicking a note in the piano roll, a note or bar in the score, a chord in the ha
 - **Pre-roll and count-in:** when jumping to a marker or a loop start, playback can start a few beats earlier, optionally with a metronome count-in, to enter the passage in tempo.
 - **Loops** with a repetition counter, a **speed trainer** (for example, start at 60 % and add 5 % per repetition up to 100 %) and edges that can be nudged by frame, attack or beat.
 - **Return to start on pause** and **replay the last seconds** turn "listen → try → listen again" into a single key.
+
+Built on 26 November 2026:
+
+- Loops count their repetitions.
+- The pre-roll (1, 2 or 4 beats) is played on every repetition and when playback starts at the loop start.
+- The count-in plays a bar of Web Audio clicks at the grid's tempo and starts the video 65 ms early, so that its sound lands on the beat.
+- The speed trainer steps the speed up on each pass.
+- Return-on-pause is a toggle (a button and a palette command), kept for every video.
+- Measured gap at the loop wrap: 7–18 ms on the test clip and 13–16 ms on the 1080p60 Monk proxy, within the 30 ms budget.
+  - The wrap is timed with a timer in the last 60 ms, since a 16 ms frame is too coarse.
+- Still to come: pre-roll when jumping to markers, and nudging loop edges from the keyboard.
 
 #### Hands-free control
 
@@ -368,12 +397,22 @@ Done in the background after a download or import:
 
 - Always visible: time (with milliseconds and frame number when paused), bar and beat when the grid exists, current section, loop state and speed.
 - Each video reopens where you left it: position, speed, loop, step unit, zoom and panel layout. The library shows how far you got in each video.
+- _Built on 26 November 2026:_
+  - The transport bar always shows the time (with milliseconds and the frame number when paused), bar and beat with the local tempo, the step unit, the loop and its repetitions, the current section and the speed.
+  - Each video reopens with its position, speed, step unit, zoom, beat grid, loop and practice settings, saved at most once a second. The core keeps them as one JSON document per video.
+  - The markers panel stays open or closed for every video.
+  - Still to come: how far you got, in the library.
 - **Suggested sections** (Phase 2): repeated passages detected in the audio (and later in the notes) are proposed as sections ("A", "B", "A′") to accept or rename.
 
 ### 4.3 Markers, loops and comments
 
 - Three kinds on the timeline: **point** (start here), **section** (named, coloured range: "Intro", "Chorus") and **loop**.
 - Markers can be added while playing (tap `M` along with the music) and renamed or moved later, with snapping.
+- _Built on 26 November 2026:_
+  - Points, sections and saved loops are stored in the core (`markers` table, CRUD API).
+  - The UI shows changes at once and rolls them back with a message if the core refuses them.
+  - The side panel lists them in time order. Click jumps, double-click renames, the dot changes the colour (8 colours), and sections and saved loops can be looped over.
+  - A loop becomes a section ("make a section from the loop") or a saved loop.
 - Markdown comments anchored to a moment or a range and, once there is a score, to a bar or a note. Filterable side panel; clicking a comment jumps there.
 
 ### 4.4 Hybrid transcription
@@ -525,10 +564,17 @@ Each phase ends with something usable and a verifiable exit criterion.
 2. The player with the full navigation layer: two-level timeline, shortcuts, frame and attack stepping, tap-tempo grid, go-to, navigation history, return to start, replay and speed. _(Done:_
    - _play/pause, ±2 s, ±10 s, frame and attack stepping, start/end, speed and replay;_
    - _the switch to the proxy once it is ready;_
-   - _the two-level timeline with waveform, ruler, attacks, zoom, follow modes and hover previews (see Timeline in 4.2)._
+   - _the two-level timeline with waveform, ruler, attacks, zoom, follow modes and hover previews;_
+   - _the tap-tempo beat grid snapped to attacks, stepping by beat and bar, go-to, history, return-on-pause, and each video reopening as it was left._
 
-   _Next: tap-tempo grid, go-to, navigation history and return to start.)_
-3. Markers, sections, A-B loops, pre-roll, count-in and speed trainer.
+   _See 4.2.)_
+3. Markers, sections, A-B loops, pre-roll, count-in and speed trainer. _(Done:_
+   - _points, sections and saved loops with a side panel;_
+   - _A-B loops by key or Shift + drag, with snapping edges and a repetition counter;_
+   - _pre-roll, count-in and speed trainer;_
+   - _a wrap gap of 7–18 ms._
+
+   _See 4.2 and 4.3.)_
 4. Comments anchored to time.
 5. YouTube downloads, chapters as markers, and the library (search, tags, remembered state).
 
@@ -609,30 +655,33 @@ Without an NVIDIA GPU, everything is designed to run well on the CPU, with optio
 
 ## 11. Decision log
 
-| Decision                       | Chosen                                                                         | Alternatives                           | Reason                                                                                             |
-| ------------------------------ | ------------------------------------------------------------------------------ | -------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| Goal                           | Local, cloud-ready                                                             | Personal use only; SaaS from the start | No server costs or YouTube blocking, without closing the door to scaling                           |
-| Top priority                   | Instant, comfortable navigation                                                | —                                      | Chosen by you: moving around the song is the core of studying it                                   |
-| App                            | Tauri 2 + React/TypeScript                                                     | Electron; web SaaS; PySide6            | Light, secure, cross-platform, mobile possible, UI reusable on the web                             |
-| Local backend                  | Rust core + Python engine                                                      | Everything in Python (FastAPI)         | Instant start-up, features 1–4 without Python, engine on demand, scalable workers                  |
-| UI ↔ core                      | HTTP + WebSocket on localhost with a token                                     | Tauri IPC (commands)                   | The same API will serve the web version; the local port is protected with a token and a Host check |
-| Playback media                 | Seek-optimised proxy (keyframe ≤ 15 frames apart, GPU encoder or OpenH264)     | Playing the downloaded file directly   | Jumps and frame steps about 10× faster (measured, 4.2); keeps ffmpeg within the LGPL               |
-| Attack detection               | Log filtered spectral flux, attacks ≥ 50 ms apart                              | SuperFlux as published                 | F 0.95 against 0.83 on real piano (measured, 4.2): a piano has no vibrato to filter out            |
-| Timeline drawing               | Canvas drawn outside React, every animation frame                              | SVG or DOM elements per tick           | 60 fps while playing and zooming, with thousands of attacks                                        |
-| Playback engine                | Native `<video>` first; Web Audio + time-stretching if measurements require it | Web Audio from day one                 | Start simple, upgrade on evidence                                                                  |
-| Beat grid before transcription | Tap tempo                                                                      | Wait until Phase 2                     | Musical navigation from the first version                                                          |
-| Transcription                  | Hybrid vision + audio                                                          | Vision only; audio only                | Precision and hands from vision, plus dynamics, pedal and fallback from audio                      |
-| Sheet music                    | Verovio                                                                        | OpenSheetMusicDisplay; VexFlow         | Better engraving and a timemap to sync with the video                                              |
-| AI inference                   | ONNX Runtime                                                                   | PyTorch in production                  | Small package, good CPU performance, GPUs from any vendor                                          |
-| MIDI input                     | Rust core (midir)                                                              | Web MIDI                               | Works the same on Windows and macOS (WebKit has no Web MIDI)                                       |
-| Harmony in v1                  | Academic level                                                                 | Functional; chords and key             | Chosen by you                                                                                      |
-| Priority                       | Base app + vision prototype                                                    | Base first; transcription first        | A useful app early, and the most uncertain part validated early                                    |
-| Licences                       | Permissive only                                                                | Allowing GPL or "non-commercial"       | Keeps the commercial option open                                                                   |
-| Language                       | English for code, comments, commits and docs; UI in Spanish and English        | Spanish documentation                  | Chosen by you                                                                                      |
-| Name                           | Segno (`io.github.danpingar.segno`)                                            | Rubato; Leggio                         | Chosen by you: the score's "jump back here" sign suits a navigation-first app                      |
-| UI components                  | shadcn/ui on Base UI                                                           | shadcn/ui on Radix; React Aria         | shadcn's current default, maintained by the original Radix authors                                 |
-| JSON naming                    | `snake_case` ([ADR 0002](adr/0002-http-api-conventions.md))                    | camelCase                              | One naming scheme across Rust, Python and TypeScript                                               |
-| Developer tools                | Project-local (`node_modules`, `engine/.venv`, `.tools/`)                      | Global installs                        | Chosen by you: reproducible, nothing leaks into the system except the C++ build tools              |
+| Decision                       | Chosen                                                                         | Alternatives                           | Reason                                                                                              |
+| ------------------------------ | ------------------------------------------------------------------------------ | -------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Goal                           | Local, cloud-ready                                                             | Personal use only; SaaS from the start | No server costs or YouTube blocking, without closing the door to scaling                            |
+| Top priority                   | Instant, comfortable navigation                                                | —                                      | Chosen by you: moving around the song is the core of studying it                                    |
+| App                            | Tauri 2 + React/TypeScript                                                     | Electron; web SaaS; PySide6            | Light, secure, cross-platform, mobile possible, UI reusable on the web                              |
+| Local backend                  | Rust core + Python engine                                                      | Everything in Python (FastAPI)         | Instant start-up, features 1–4 without Python, engine on demand, scalable workers                   |
+| UI ↔ core                      | HTTP + WebSocket on localhost with a token                                     | Tauri IPC (commands)                   | The same API will serve the web version; the local port is protected with a token and a Host check  |
+| Playback media                 | Seek-optimised proxy (keyframe ≤ 15 frames apart, GPU encoder or OpenH264)     | Playing the downloaded file directly   | Jumps and frame steps about 10× faster (measured, 4.2); keeps ffmpeg within the LGPL                |
+| Attack detection               | Log filtered spectral flux, attacks ≥ 50 ms apart                              | SuperFlux as published                 | F 0.95 against 0.83 on real piano (measured, 4.2): a piano has no vibrato to filter out             |
+| Timeline drawing               | Canvas drawn outside React, every animation frame                              | SVG or DOM elements per tick           | 60 fps while playing and zooming, with thousands of attacks                                         |
+| Player state                   | A runtime class outside React plus a Zustand store per video                   | React state and effects                | Commands, timeline and loop engine share it without re-renders; seeks feed the history in one place |
+| Saved study state              | One validated JSON document per video, every field with a default              | A column per setting                   | Grows with the player without migrations; older documents still load                                |
+| Beat grid                      | Tapped beats snapped to attacks, extrapolated at the ends                      | A single tempo and offset              | Keeps rubato (jazz ballads), and tapping only a few bars still gives a whole grid                   |
+| Playback engine                | Native `<video>` first; Web Audio + time-stretching if measurements require it | Web Audio from day one                 | Start simple, upgrade on evidence                                                                   |
+| Beat grid before transcription | Tap tempo                                                                      | Wait until Phase 2                     | Musical navigation from the first version                                                           |
+| Transcription                  | Hybrid vision + audio                                                          | Vision only; audio only                | Precision and hands from vision, plus dynamics, pedal and fallback from audio                       |
+| Sheet music                    | Verovio                                                                        | OpenSheetMusicDisplay; VexFlow         | Better engraving and a timemap to sync with the video                                               |
+| AI inference                   | ONNX Runtime                                                                   | PyTorch in production                  | Small package, good CPU performance, GPUs from any vendor                                           |
+| MIDI input                     | Rust core (midir)                                                              | Web MIDI                               | Works the same on Windows and macOS (WebKit has no Web MIDI)                                        |
+| Harmony in v1                  | Academic level                                                                 | Functional; chords and key             | Chosen by you                                                                                       |
+| Priority                       | Base app + vision prototype                                                    | Base first; transcription first        | A useful app early, and the most uncertain part validated early                                     |
+| Licences                       | Permissive only                                                                | Allowing GPL or "non-commercial"       | Keeps the commercial option open                                                                    |
+| Language                       | English for code, comments, commits and docs; UI in Spanish and English        | Spanish documentation                  | Chosen by you                                                                                       |
+| Name                           | Segno (`io.github.danpingar.segno`)                                            | Rubato; Leggio                         | Chosen by you: the score's "jump back here" sign suits a navigation-first app                       |
+| UI components                  | shadcn/ui on Base UI                                                           | shadcn/ui on Radix; React Aria         | shadcn's current default, maintained by the original Radix authors                                  |
+| JSON naming                    | `snake_case` ([ADR 0002](adr/0002-http-api-conventions.md))                    | camelCase                              | One naming scheme across Rust, Python and TypeScript                                                |
+| Developer tools                | Project-local (`node_modules`, `engine/.venv`, `.tools/`)                      | Global installs                        | Chosen by you: reproducible, nothing leaks into the system except the C++ build tools               |
 
 ## 12. Open questions
 

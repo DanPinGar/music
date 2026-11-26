@@ -1,7 +1,7 @@
 import type { Command } from "@/commands/registry";
 import { nextAttack, previousAttack } from "./attacks";
+import { nextBar, nextBeat, previousBar, previousBeat } from "./beat-grid";
 import {
-  clampTime,
   frameStep,
   LONG_STEP_SECONDS,
   nextRate,
@@ -9,36 +9,42 @@ import {
   REPLAY_SECONDS,
   STEP_SECONDS,
 } from "./navigation";
+import type { PlayerRuntime } from "./player-runtime";
+import { STEP_UNITS, setReturnOnPause } from "./session";
 
-/**
- * The player's commands, acting on whatever video element `video()` returns. `attacks()`
- * gives the times of the attacks (note onsets) once the core has found them.
- */
-export function playerCommands(
-  video: () => HTMLVideoElement | null,
-  fps: number,
-  attacks: () => readonly number[] | null = () => null,
-): Command[] {
-  const enabled = () => video() !== null;
-  const hasAttacks = () => enabled() && (attacks()?.length ?? 0) > 0;
+/** What the player commands open in the UI. */
+export interface PlayerUi {
+  openGoTo(): void;
+}
+
+/** Playback and navigation: play, step by frame, attack, beat, bar or seconds, jump, history. */
+export function playerCommands(runtime: PlayerRuntime, ui: PlayerUi): Command[] {
+  const { session } = runtime;
+  const enabled = () => runtime.video() !== null;
+  const hasAttacks = () => enabled() && (runtime.attacks?.length ?? 0) > 0;
   const withVideo = (action: (element: HTMLVideoElement) => void) => () => {
-    const element = video();
+    const element = runtime.video();
     if (element) action(element);
-  };
-  const seekTo = (element: HTMLVideoElement, time: number) => {
-    element.currentTime = clampTime(time, element.duration);
-  };
-  const play = (element: HTMLVideoElement) => {
-    // play() rejects when a later pause() interrupts it; nothing to report then.
-    element.play().catch(() => {});
   };
   const stepFrames = (frames: number) =>
     withVideo((element) => {
       element.pause();
-      seekTo(element, frameStep(element.currentTime, fps, frames));
+      runtime.seek(frameStep(element.currentTime, runtime.fps, frames));
     });
-  const seekBy = (seconds: number) =>
-    withVideo((element) => seekTo(element, element.currentTime + seconds));
+  const seekBy = (seconds: number) => () => runtime.seek(runtime.time() + seconds);
+  /** ← and →: by the step unit, falling back to seconds without a beat grid. */
+  const step = (direction: 1 | -1) => () => {
+    const { stepUnit, grid } = session.getState();
+    const time = runtime.time();
+    const playing = runtime.playing();
+    if (grid && stepUnit === "beat") {
+      runtime.seek(direction > 0 ? nextBeat(grid, time) : previousBeat(grid, time, playing));
+    } else if (grid && stepUnit === "bar") {
+      runtime.seek(direction > 0 ? nextBar(grid, time) : previousBar(grid, time, playing));
+    } else {
+      runtime.seek(time + direction * STEP_SECONDS);
+    }
+  };
   const changeRate = (delta: number) =>
     withVideo((element) => {
       element.playbackRate = nextRate(element.playbackRate, delta);
@@ -51,7 +57,7 @@ export function playerCommands(
       group: "playback",
       keys: ["Space", "K"],
       enabled,
-      run: withVideo((element) => (element.paused ? play(element) : element.pause())),
+      run: () => runtime.togglePlay(),
     },
     {
       id: "player.replay",
@@ -60,9 +66,15 @@ export function playerCommands(
       keys: ["Backspace"],
       enabled,
       run: withVideo((element) => {
-        seekTo(element, element.currentTime - REPLAY_SECONDS);
-        play(element);
+        runtime.seek(element.currentTime - REPLAY_SECONDS, { record: false });
+        element.play().catch(() => {});
       }),
+    },
+    {
+      id: "player.toggleReturnOnPause",
+      title: "commands.toggleReturnOnPause",
+      group: "playback",
+      run: () => setReturnOnPause(session, !session.getState().returnOnPause),
     },
     {
       id: "player.slower",
@@ -102,10 +114,10 @@ export function playerCommands(
       group: "navigation",
       keys: ["Shift+ArrowLeft"],
       enabled: hasAttacks,
-      run: withVideo((element) => {
-        const time = previousAttack(attacks() ?? [], element.currentTime, !element.paused);
-        if (time !== undefined) seekTo(element, time);
-      }),
+      run: () => {
+        const time = previousAttack(runtime.attacks ?? [], runtime.time(), runtime.playing());
+        if (time !== undefined) runtime.seek(time);
+      },
     },
     {
       id: "player.nextAttack",
@@ -113,10 +125,10 @@ export function playerCommands(
       group: "navigation",
       keys: ["Shift+ArrowRight"],
       enabled: hasAttacks,
-      run: withVideo((element) => {
-        const time = nextAttack(attacks() ?? [], element.currentTime);
-        if (time !== undefined) seekTo(element, time);
-      }),
+      run: () => {
+        const time = nextAttack(runtime.attacks ?? [], runtime.time());
+        if (time !== undefined) runtime.seek(time);
+      },
     },
     {
       id: "player.stepBack",
@@ -124,7 +136,7 @@ export function playerCommands(
       group: "navigation",
       keys: ["ArrowLeft"],
       enabled,
-      run: seekBy(-STEP_SECONDS),
+      run: step(-1),
     },
     {
       id: "player.stepForward",
@@ -132,7 +144,20 @@ export function playerCommands(
       group: "navigation",
       keys: ["ArrowRight"],
       enabled,
-      run: seekBy(STEP_SECONDS),
+      run: step(1),
+    },
+    {
+      id: "player.cycleStepUnit",
+      title: "commands.cycleStepUnit",
+      group: "navigation",
+      keys: ["S"],
+      enabled,
+      run: () => {
+        const { stepUnit, grid } = session.getState();
+        const units = grid ? STEP_UNITS : (["seconds"] as const);
+        const next = units[(units.indexOf(stepUnit) + 1) % units.length] ?? "seconds";
+        session.setState({ stepUnit: next });
+      },
     },
     {
       id: "player.longBack",
@@ -156,7 +181,10 @@ export function playerCommands(
       group: "navigation",
       keys: ["Home"],
       enabled,
-      run: withVideo((element) => seekTo(element, 0)),
+      run: () => {
+        const { loop } = session.getState();
+        runtime.seek(loop?.enabled ? loop.start : 0);
+      },
     },
     {
       id: "player.goToEnd",
@@ -164,7 +192,41 @@ export function playerCommands(
       group: "navigation",
       keys: ["End"],
       enabled,
-      run: withVideo((element) => seekTo(element, element.duration)),
+      run: () => {
+        const { loop } = session.getState();
+        // The loop's last frame: its very end would wrap straight round while playing.
+        runtime.seek(loop?.enabled ? loop.end - 1 / runtime.fps : runtime.duration);
+      },
+    },
+    {
+      id: "player.goTo",
+      title: "commands.goTo",
+      group: "navigation",
+      keys: ["G"],
+      enabled,
+      run: () => ui.openGoTo(),
+    },
+    {
+      id: "player.historyBack",
+      title: "commands.historyBack",
+      group: "navigation",
+      keys: ["Alt+ArrowLeft"],
+      enabled: () => enabled() && runtime.history.canGoBack,
+      run: () => {
+        const time = runtime.history.back(runtime.time());
+        if (time !== undefined) runtime.seek(time, { record: false });
+      },
+    },
+    {
+      id: "player.historyForward",
+      title: "commands.historyForward",
+      group: "navigation",
+      keys: ["Alt+ArrowRight"],
+      enabled: () => enabled() && runtime.history.canGoForward,
+      run: () => {
+        const time = runtime.history.forward(runtime.time());
+        if (time !== undefined) runtime.seek(time, { record: false });
+      },
     },
   ];
 }

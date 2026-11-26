@@ -33,7 +33,14 @@
     "play": "Play",
     "pause": "Pause",
     "position": "Position",
-    "speed": "Speed"
+    "speed": "Speed",
+    "frame": "Frame",
+    "step": "Step: {{unit}}",
+    "stepUnits": {
+      "seconds": "2 s",
+      "beat": "beat",
+      "bar": "bar"
+    }
   },
   "timeline": {
     "overview": "Whole song",
@@ -76,16 +83,39 @@
     "nextFrame": "Next frame",
     "prevAttack": "Previous attack (note)",
     "nextAttack": "Next attack (note)",
-    "stepBack": "Back 2 seconds",
-    "stepForward": "Forward 2 seconds",
+    "stepBack": "Back one step (2 s, a beat or a bar)",
+    "stepForward": "Forward one step (2 s, a beat or a bar)",
     "longBack": "Back 10 seconds",
     "longForward": "Forward 10 seconds",
-    "goToStart": "Go to the start",
-    "goToEnd": "Go to the end",
+    "goToStart": "Go to the start (of the loop, when on)",
+    "goToEnd": "Go to the end (of the loop, when on)",
     "zoomIn": "Zoom in on the timeline",
     "zoomOut": "Zoom out of the timeline",
     "zoomFit": "Show the whole song in the timeline",
-    "cycleFollow": "Change how the timeline follows playback"
+    "cycleFollow": "Change how the timeline follows playback",
+    "toggleReturnOnPause": "Return to the starting point on pause",
+    "cycleStepUnit": "Change the arrows' step (2 s, beat, bar)",
+    "goTo": "Go to a time, bar, frame or marker",
+    "historyBack": "Go back to where you were before the last jump",
+    "historyForward": "Redo the jump you went back from",
+    "tapTempo": "Tap the beat (tap tempo)",
+    "downbeatHere": "Start a bar on this beat",
+    "cycleBeatsPerBar": "Change the beats per bar",
+    "clearGrid": "Clear the bar grid",
+    "loopStart": "Loop start here (A)",
+    "loopEnd": "Loop end here (B)",
+    "toggleLoop": "Turn the loop on or off",
+    "clearLoop": "Remove the loop",
+    "saveLoop": "Save the loop",
+    "loopToSection": "Make a section from the loop",
+    "cyclePreRoll": "Change the loop's pre-roll",
+    "toggleCountIn": "Turn the count-in on or off",
+    "toggleTrainer": "Turn the speed trainer on or off",
+    "addMarker": "Add a marker here",
+    "previousMarker": "Previous marker or section",
+    "nextMarker": "Next marker or section",
+    "jumpToMarker": "Go to marker 1–9",
+    "toggleMarkersPanel": "Show or hide the markers panel"
   },
   "commandGroups": {
     "general": "General",
@@ -111,6 +141,58 @@
   },
   "common": {
     "loading": "Loading…",
-    "retry": "Retry"
+    "retry": "Retry",
+    "close": "Close"
+  },
+  "grid": {
+    "position": "Bar {{bar}}.{{beat}}",
+    "none": "No bars (T)",
+    "title": "Bar grid",
+    "help": "Play and press T on every beat for a few bars, starting on the first beat of a bar. Taps snap to the attacks, and you can tap a stretch again to correct it.",
+    "beatsPerBar": "Beats per bar"
+  },
+  "loop": {
+    "none": "No loop",
+    "title": "Loop",
+    "help": "A and B set the start and end at the playhead; Shift + drag on the timeline makes one, and its edges can be dragged.",
+    "turnOn": "Turn on",
+    "turnOff": "Turn off",
+    "preRoll": "Pre-roll",
+    "off": "Off",
+    "beats_one": "{{count}} beat",
+    "beats_other": "{{count}} beats",
+    "countIn": "Count-in (a bar of metronome)",
+    "trainer": "Speed trainer",
+    "trainerFrom": "From",
+    "trainerStep": "Up each pass",
+    "trainerTo": "Up to",
+    "countingIn": "Counting in…",
+    "loopNeedsRange": "Set a loop with A and B, or make a section or a bar grid first."
+  },
+  "goTo": {
+    "title": "Go to",
+    "description": "A time, a bar, a frame or a marker",
+    "placeholder": "1:23.5 · b32 · b32.3 · f740 · a marker's name",
+    "nothing": "Type a time (1:23.5), a bar (b32), a frame (f740) or a marker's name.",
+    "needsGrid": "To go to a bar, tap the beat with T first.",
+    "time": "Go to {{time}}",
+    "frame": "Go to frame {{frame}}",
+    "bar": "Go to bar {{bar}}, beat {{beat}}"
+  },
+  "markers": {
+    "title": "Markers",
+    "help": "M adds a marker, even while playing; so does a double-click on the timeline. Keys 1–9 jump to them.",
+    "empty": "No markers yet.",
+    "recolour": "Change the colour",
+    "rename": "Rename",
+    "jumpHint": "Click to go there; double-click to rename",
+    "loopOver": "Loop over it",
+    "delete": "Delete",
+    "saveFailed": "The marker could not be saved",
+    "kinds": {
+      "point": "Marker",
+      "section": "Section",
+      "loop": "Saved loop"
+    }
   }
 }

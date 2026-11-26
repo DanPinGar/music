@@ -33,7 +33,14 @@
     "play": "Reproducir",
     "pause": "Pausa",
     "position": "Posición",
-    "speed": "Velocidad"
+    "speed": "Velocidad",
+    "frame": "Fotograma",
+    "step": "Paso: {{unit}}",
+    "stepUnits": {
+      "seconds": "2 s",
+      "beat": "tiempo",
+      "bar": "compás"
+    }
   },
   "timeline": {
     "overview": "Canción entera",
@@ -76,16 +83,39 @@
     "nextFrame": "Fotograma siguiente",
     "prevAttack": "Ataque anterior (nota)",
     "nextAttack": "Ataque siguiente (nota)",
-    "stepBack": "Retroceder 2 segundos",
-    "stepForward": "Avanzar 2 segundos",
+    "stepBack": "Retroceder un paso (2 s, un tiempo o un compás)",
+    "stepForward": "Avanzar un paso (2 s, un tiempo o un compás)",
     "longBack": "Retroceder 10 segundos",
     "longForward": "Avanzar 10 segundos",
-    "goToStart": "Ir al principio",
-    "goToEnd": "Ir al final",
+    "goToStart": "Ir al principio (del bucle, si está activo)",
+    "goToEnd": "Ir al final (del bucle, si está activo)",
     "zoomIn": "Acercar la línea de tiempo",
     "zoomOut": "Alejar la línea de tiempo",
     "zoomFit": "Ver la canción entera en la línea de tiempo",
-    "cycleFollow": "Cambiar cómo sigue la línea de tiempo a la reproducción"
+    "cycleFollow": "Cambiar cómo sigue la línea de tiempo a la reproducción",
+    "toggleReturnOnPause": "Volver al punto de inicio al pausar",
+    "cycleStepUnit": "Cambiar el paso de las flechas (2 s, tiempo, compás)",
+    "goTo": "Ir a un tiempo, compás, fotograma o marcador",
+    "historyBack": "Volver a donde estabas antes del último salto",
+    "historyForward": "Rehacer el salto deshecho",
+    "tapTempo": "Marcar el pulso (tap tempo)",
+    "downbeatHere": "Empezar un compás en este tiempo",
+    "cycleBeatsPerBar": "Cambiar los tiempos por compás",
+    "clearGrid": "Borrar la rejilla de compases",
+    "loopStart": "Inicio del bucle aquí (A)",
+    "loopEnd": "Final del bucle aquí (B)",
+    "toggleLoop": "Activar o desactivar el bucle",
+    "clearLoop": "Quitar el bucle",
+    "saveLoop": "Guardar el bucle",
+    "loopToSection": "Crear una sección con el bucle",
+    "cyclePreRoll": "Cambiar la entrada previa del bucle",
+    "toggleCountIn": "Activar o desactivar la cuenta de entrada",
+    "toggleTrainer": "Activar o desactivar el entrenador de velocidad",
+    "addMarker": "Añadir un marcador aquí",
+    "previousMarker": "Marcador o sección anterior",
+    "nextMarker": "Marcador o sección siguiente",
+    "jumpToMarker": "Ir al marcador 1–9",
+    "toggleMarkersPanel": "Mostrar u ocultar el panel de marcadores"
   },
   "commandGroups": {
     "general": "General",
@@ -111,6 +141,58 @@
   },
   "common": {
     "loading": "Cargando…",
-    "retry": "Reintentar"
+    "retry": "Reintentar",
+    "close": "Cerrar"
+  },
+  "grid": {
+    "position": "Compás {{bar}}.{{beat}}",
+    "none": "Sin compases (T)",
+    "title": "Rejilla de compases",
+    "help": "Reproduce y pulsa T en cada tiempo durante unos compases; empieza en el primer tiempo de un compás. Los toques se ajustan a los ataques, y puedes repetir un tramo para corregirlo.",
+    "beatsPerBar": "Tiempos por compás"
+  },
+  "loop": {
+    "none": "Sin bucle",
+    "title": "Bucle",
+    "help": "A y B marcan el inicio y el final en el cursor; Mayús + arrastrar en la línea de tiempo crea uno, y sus bordes se pueden arrastrar.",
+    "turnOn": "Activar",
+    "turnOff": "Desactivar",
+    "preRoll": "Entrada previa",
+    "off": "No",
+    "beats_one": "{{count}} tiempo",
+    "beats_other": "{{count}} tiempos",
+    "countIn": "Cuenta de entrada (un compás de metrónomo)",
+    "trainer": "Entrenador de velocidad",
+    "trainerFrom": "Desde",
+    "trainerStep": "Sube cada vuelta",
+    "trainerTo": "Hasta",
+    "countingIn": "Contando…",
+    "loopNeedsRange": "Marca un bucle con A y B, o crea una sección o una rejilla de compases."
+  },
+  "goTo": {
+    "title": "Ir a",
+    "description": "Un tiempo, un compás, un fotograma o un marcador",
+    "placeholder": "1:23.5 · c32 · c32.3 · f740 · nombre de un marcador",
+    "nothing": "Escribe un tiempo (1:23.5), un compás (c32), un fotograma (f740) o el nombre de un marcador.",
+    "needsGrid": "Para ir a un compás, marca antes el pulso con T.",
+    "time": "Ir a {{time}}",
+    "frame": "Ir al fotograma {{frame}}",
+    "bar": "Ir al compás {{bar}}, tiempo {{beat}}"
+  },
+  "markers": {
+    "title": "Marcadores",
+    "help": "M añade un marcador incluso mientras suena; doble clic en la línea de tiempo también. Los números 1–9 saltan a ellos.",
+    "empty": "Aún no hay marcadores.",
+    "recolour": "Cambiar el color",
+    "rename": "Renombrar",
+    "jumpHint": "Clic para ir; doble clic para renombrar",
+    "loopOver": "Repetir en bucle",
+    "delete": "Borrar",
+    "saveFailed": "No se ha podido guardar el marcador",
+    "kinds": {
+      "point": "Marcador",
+      "section": "Sección",
+      "loop": "Bucle guardado"
+    }
   }
 }

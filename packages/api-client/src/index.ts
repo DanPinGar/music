@@ -11,6 +11,10 @@ export type Thumbnails = components["schemas"]["ThumbnailsDto"];
 export type Preparation = components["schemas"]["PreparationDto"];
 export type Peaks = components["schemas"]["PeaksDto"];
 export type Attacks = components["schemas"]["AttacksDto"];
+export type VideoState = components["schemas"]["VideoStateDto"];
+export type Marker = components["schemas"]["MarkerDto"];
+export type NewMarker = components["schemas"]["NewMarkerDto"];
+export type MarkerChanges = components["schemas"]["MarkerChangesDto"];
 
 /** Files of a video that elements load by URL: `<video src>`, CSS backgrounds… */
 export type VideoAsset = "media" | "thumbnails" | "peaks";

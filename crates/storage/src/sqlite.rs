@@ -4,7 +4,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use segno_domain::{DomainError, Result, Video, VideoId, VideoRepository};
+use segno_domain::{
+    DomainError, Marker, MarkerId, MarkerRepository, Result, Video, VideoId, VideoRepository,
+    VideoState, VideoStateRepository,
+};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::{FromRow, SqlitePool};
 
@@ -220,9 +223,175 @@ impl VideoRepository for SqliteStore {
     }
 }
 
+#[async_trait]
+impl VideoStateRepository for SqliteStore {
+    async fn get_state(&self, video: VideoId) -> Result<Option<VideoState>> {
+        let json: Option<String> =
+            sqlx::query_scalar("SELECT state FROM video_states WHERE video_id = ?")
+                .bind(video.to_string())
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(DomainError::storage)?;
+        json.map(|json| serde_json::from_str(&json).map_err(DomainError::storage))
+            .transpose()
+    }
+
+    async fn save_state(&self, video: VideoId, state: &VideoState) -> Result<()> {
+        let json = serde_json::to_string(state).map_err(DomainError::storage)?;
+        sqlx::query(
+            "INSERT INTO video_states (video_id, state, updated_at) VALUES (?, ?, ?) \
+             ON CONFLICT (video_id) DO UPDATE SET state = excluded.state, \
+             updated_at = excluded.updated_at",
+        )
+        .bind(video.to_string())
+        .bind(json)
+        .bind(Utc::now())
+        .execute(&self.pool)
+        .await
+        .map_err(DomainError::storage)?;
+        Ok(())
+    }
+}
+
+macro_rules! marker_columns {
+    () => {
+        "id, video_id, kind, start_ms, end_ms, label, color, created_at, updated_at"
+    };
+}
+
+#[derive(FromRow)]
+struct MarkerRow {
+    id: String,
+    video_id: String,
+    kind: String,
+    start_ms: i64,
+    end_ms: Option<i64>,
+    label: String,
+    color: Option<String>,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+}
+
+impl TryFrom<MarkerRow> for Marker {
+    type Error = DomainError;
+
+    fn try_from(row: MarkerRow) -> Result<Self> {
+        Ok(Self {
+            id: row.id.parse()?,
+            video: row.video_id.parse()?,
+            kind: row.kind.parse()?,
+            start_ms: row.start_ms,
+            end_ms: row.end_ms,
+            label: row.label,
+            color: row.color,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        })
+    }
+}
+
+fn marker_not_found(id: MarkerId) -> DomainError {
+    DomainError::NotFound {
+        entity: "marker",
+        id: id.to_string(),
+    }
+}
+
+#[async_trait]
+impl MarkerRepository for SqliteStore {
+    async fn list_markers(&self, video: VideoId) -> Result<Vec<Marker>> {
+        let rows: Vec<MarkerRow> = sqlx::query_as(concat!(
+            "SELECT ",
+            marker_columns!(),
+            " FROM markers WHERE video_id = ? AND deleted_at IS NULL ORDER BY start_ms, id"
+        ))
+        .bind(video.to_string())
+        .fetch_all(&self.pool)
+        .await
+        .map_err(DomainError::storage)?;
+        rows.into_iter().map(Marker::try_from).collect()
+    }
+
+    async fn get_marker(&self, video: VideoId, id: MarkerId) -> Result<Marker> {
+        let row: Option<MarkerRow> = sqlx::query_as(concat!(
+            "SELECT ",
+            marker_columns!(),
+            " FROM markers WHERE id = ? AND video_id = ? AND deleted_at IS NULL"
+        ))
+        .bind(id.to_string())
+        .bind(video.to_string())
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(DomainError::storage)?;
+        row.ok_or_else(|| marker_not_found(id))?.try_into()
+    }
+
+    async fn insert_marker(&self, marker: &Marker) -> Result<()> {
+        sqlx::query(concat!(
+            "INSERT INTO markers (",
+            marker_columns!(),
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        ))
+        .bind(marker.id.to_string())
+        .bind(marker.video.to_string())
+        .bind(marker.kind.as_str())
+        .bind(marker.start_ms)
+        .bind(marker.end_ms)
+        .bind(&marker.label)
+        .bind(&marker.color)
+        .bind(marker.created_at)
+        .bind(marker.updated_at)
+        .execute(&self.pool)
+        .await
+        .map_err(DomainError::storage)?;
+        Ok(())
+    }
+
+    async fn update_marker(&self, marker: &Marker) -> Result<()> {
+        let result = sqlx::query(
+            "UPDATE markers SET start_ms = ?, end_ms = ?, label = ?, color = ?, updated_at = ? \
+             WHERE id = ? AND video_id = ? AND deleted_at IS NULL",
+        )
+        .bind(marker.start_ms)
+        .bind(marker.end_ms)
+        .bind(&marker.label)
+        .bind(&marker.color)
+        .bind(marker.updated_at)
+        .bind(marker.id.to_string())
+        .bind(marker.video.to_string())
+        .execute(&self.pool)
+        .await
+        .map_err(DomainError::storage)?;
+        if result.rows_affected() == 0 {
+            return Err(marker_not_found(marker.id));
+        }
+        Ok(())
+    }
+
+    async fn delete_marker(&self, video: VideoId, id: MarkerId) -> Result<()> {
+        let result = sqlx::query(
+            "UPDATE markers SET deleted_at = ?, updated_at = ? \
+             WHERE id = ? AND video_id = ? AND deleted_at IS NULL",
+        )
+        .bind(Utc::now())
+        .bind(Utc::now())
+        .bind(id.to_string())
+        .bind(video.to_string())
+        .execute(&self.pool)
+        .await
+        .map_err(DomainError::storage)?;
+        if result.rows_affected() == 0 {
+            return Err(marker_not_found(id));
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use segno_domain::{VideoSource, VideoStatus};
+    use segno_domain::{
+        BeatGrid, LoopRange, MarkerFields, MarkerKind, StepUnit, VideoSource, VideoStatus,
+    };
 
     use super::*;
 
@@ -323,6 +492,125 @@ mod tests {
 
         let other = SqliteStore::in_memory().await.unwrap();
         assert_ne!(other.library_id().await.unwrap(), id);
+    }
+
+    #[tokio::test]
+    async fn video_states_are_saved_and_replaced() {
+        let store = SqliteStore::in_memory().await.unwrap();
+        let video = sample("Stateful");
+        store.insert(&video).await.unwrap();
+        assert_eq!(store.get_state(video.id).await.unwrap(), None);
+
+        let mut state = VideoState {
+            position_ms: 42_000,
+            speed: 0.8,
+            step_unit: StepUnit::Beat,
+            beat_grid: Some(BeatGrid {
+                beats_ms: vec![500, 1100, 1700],
+                beats_per_bar: 3,
+                downbeat: 0,
+            }),
+            loop_range: Some(LoopRange {
+                start_ms: 1000,
+                end_ms: 9000,
+                enabled: true,
+            }),
+            ..VideoState::default()
+        };
+        store.save_state(video.id, &state).await.unwrap();
+        assert_eq!(
+            store.get_state(video.id).await.unwrap().as_ref(),
+            Some(&state)
+        );
+
+        state.position_ms = 1;
+        store.save_state(video.id, &state).await.unwrap();
+        assert_eq!(
+            store
+                .get_state(video.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .position_ms,
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn markers_are_listed_in_time_order_until_deleted() {
+        let store = SqliteStore::in_memory().await.unwrap();
+        let video = sample("Marked");
+        store.insert(&video).await.unwrap();
+        let marker = |kind, start_ms, end_ms: Option<i64>| {
+            Marker::new(
+                video.id,
+                kind,
+                MarkerFields {
+                    start_ms,
+                    end_ms,
+                    label: format!("at {start_ms}"),
+                    color: None,
+                },
+            )
+            .unwrap()
+        };
+        let late = marker(MarkerKind::Point, 9000, None);
+        let mut section = marker(MarkerKind::Section, 1000, Some(5000));
+        for item in [&late, &section] {
+            store.insert_marker(item).await.unwrap();
+        }
+
+        let starts: Vec<i64> = store
+            .list_markers(video.id)
+            .await
+            .unwrap()
+            .iter()
+            .map(|m| m.start_ms)
+            .collect();
+        assert_eq!(starts, [1000, 9000]);
+
+        section
+            .change(MarkerFields {
+                start_ms: 2000,
+                end_ms: Some(6000),
+                label: "Chorus".into(),
+                color: Some("#ff0000".into()),
+            })
+            .unwrap();
+        store.update_marker(&section).await.unwrap();
+        assert_eq!(
+            store.get_marker(video.id, section.id).await.unwrap(),
+            section
+        );
+
+        store.delete_marker(video.id, late.id).await.unwrap();
+        assert_eq!(store.list_markers(video.id).await.unwrap(), vec![section]);
+        assert!(matches!(
+            store.delete_marker(video.id, late.id).await,
+            Err(DomainError::NotFound { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn markers_belong_to_their_video() {
+        let store = SqliteStore::in_memory().await.unwrap();
+        let (mine, other) = (sample("Mine"), sample("Other"));
+        store.insert(&mine).await.unwrap();
+        store.insert(&other).await.unwrap();
+        let marker = Marker::new(
+            mine.id,
+            MarkerKind::Point,
+            MarkerFields {
+                start_ms: 0,
+                end_ms: None,
+                label: String::new(),
+                color: None,
+            },
+        )
+        .unwrap();
+        store.insert_marker(&marker).await.unwrap();
+        assert!(store.get_marker(other.id, marker.id).await.is_err());
+        assert!(store.delete_marker(other.id, marker.id).await.is_err());
     }
 
     #[tokio::test]

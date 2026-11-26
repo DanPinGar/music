@@ -1,5 +1,8 @@
 import type { Attacks } from "@segno/api-client";
 import { firstAtOrAfter } from "../attacks";
+import { type BeatGrid, gridLines } from "../beat-grid";
+import { type Loop, MIN_LOOP_SECONDS, snapTo } from "../loop";
+import { DEFAULT_MARKER_COLOR, type MarkerItem, markerTimes } from "../markers";
 import { formatTimecode } from "../navigation";
 import {
   clampView,
@@ -46,12 +49,49 @@ interface Surface {
   ratio: number;
 }
 
-interface Drag {
-  readonly surface: SurfaceName;
-  readonly pointer: number;
-  readonly startX: number;
-  readonly wasPlaying: boolean;
-  scrubbing: boolean;
+/** Something on the detail view that can be dragged. */
+type Handle =
+  | { readonly kind: "loop"; readonly edge: "start" | "end" }
+  | { readonly kind: "marker"; readonly id: string; readonly edge: "start" | "end" };
+
+type Drag =
+  /** A press that jumps, and scrubs once it moves. */
+  | {
+      readonly mode: "seek";
+      readonly surface: SurfaceName;
+      readonly pointer: number;
+      readonly startX: number;
+      readonly wasPlaying: boolean;
+      scrubbing: boolean;
+    }
+  /** Shift + drag: a new loop between the press and the pointer. */
+  | {
+      readonly mode: "range";
+      readonly surface: SurfaceName;
+      readonly pointer: number;
+      readonly anchor: number;
+      readonly candidates: readonly number[];
+    }
+  /** Moving a loop edge or a marker, snapping to `candidates`. */
+  | {
+      readonly mode: "handle";
+      readonly surface: SurfaceName;
+      readonly pointer: number;
+      readonly handle: Handle;
+      readonly candidates: readonly number[];
+    };
+
+/** What the timeline asks the player to do with gestures that change its data. */
+export interface TimelineHandlers {
+  onLoopChange(loop: Loop): void;
+  onMarkerMove(id: string, start: number, end: number | null): void;
+  onAddMarker(time: number): void;
+}
+
+/** A change shown while it is being dragged, before it is committed. */
+interface Preview {
+  readonly loop?: Loop;
+  readonly marker?: { readonly id: string; readonly start: number; readonly end: number | null };
 }
 
 interface Palette {
@@ -75,7 +115,15 @@ const WHEEL_PAN = 0.002;
 /** …and Ctrl + one notch zooms by about 20 %. */
 const WHEEL_ZOOM = 0.002;
 const ATTACK_COLOR = "oklch(0.8 0.15 75)";
+const LOOP_COLOR = "oklch(0.72 0.14 235)";
 const PREFERENCES_KEY = "segno.timeline";
+/** Handles and snapping reach this far, in pixels. */
+const GRAB_PIXELS = 6;
+const SNAP_PIXELS = 8;
+/** Height of the band where sections are named, under the ruler. */
+const SECTION_BAND = 13;
+/** Beat lines are drawn once beats are this far apart, in pixels. */
+const BEAT_LINE_SPACING = 5;
 
 interface Preferences {
   readonly follow: FollowMode;
@@ -98,6 +146,14 @@ export class TimelineController {
   #jumped = false;
   #waveform: Waveform | null = null;
   #attacks: Attacks | null = null;
+  #grid: BeatGrid | null = null;
+  #markers: readonly MarkerItem[] = [];
+  #loop: Loop | null = null;
+  #handlers: TimelineHandlers | null = null;
+  #preview: Preview | null = null;
+  /** Bumped whenever drawn data changes, so the next frame redraws. */
+  #version = 0;
+  readonly #viewListeners = new Set<() => void>();
   #surfaces: Partial<Record<SurfaceName, Surface>> = {};
   #hover: Hover | null = null;
   #drag: Drag | null = null;
@@ -143,6 +199,49 @@ export class TimelineController {
     this.#invalidate();
   }
 
+  setGrid(grid: BeatGrid | null): void {
+    this.#grid = grid;
+    this.#version++;
+    this.#surfaces.detail?.canvas.setAttribute(
+      "data-grid",
+      grid ? grid.beats.map((time) => time.toFixed(3)).join(",") : "",
+    );
+  }
+
+  setMarkers(markers: readonly MarkerItem[]): void {
+    this.#markers = markers;
+    this.#version++;
+  }
+
+  setLoop(loop: Loop | null): void {
+    this.#loop = loop;
+    this.#version++;
+    const canvas = this.#surfaces.detail?.canvas;
+    if (!canvas) return;
+    canvas.setAttribute("data-loop", loop ? `${loop.start.toFixed(3)}-${loop.end.toFixed(3)}` : "");
+  }
+
+  setHandlers(handlers: TimelineHandlers | null): void {
+    this.#handlers = handlers;
+  }
+
+  /** The stretch the detail view shows. */
+  get view(): View {
+    return this.#view;
+  }
+
+  /** Shows `view` in the detail view (a restored zoom, say); following resumes at the next jump. */
+  setView(view: View): void {
+    this.#setView(clampView(view, this.#duration));
+    this.#suspended = true;
+  }
+
+  /** Calls `listener` whenever the detail view moves or zooms. */
+  subscribeView(listener: () => void): () => void {
+    this.#viewListeners.add(listener);
+    return () => this.#viewListeners.delete(listener);
+  }
+
   /** The video started a seek: the next frame brings the playhead into view. */
   noteJump(): void {
     this.#jumped = true;
@@ -179,6 +278,12 @@ export class TimelineController {
       listen("pointerleave", () => {
         if (!this.#drag) this.#setHover(null);
       });
+      if (name === "detail") {
+        listen("dblclick", (event) => {
+          const x = this.#xOf(surface, event);
+          if (!this.#handleAt(surface, x)) this.#handlers?.onAddMarker(this.#timeAt(surface, x));
+        });
+      }
       // Not passive: the wheel must not scroll or zoom the page.
       listen("wheel", (event) => this.#wheel(surface, event), { passive: false });
     }
@@ -189,6 +294,8 @@ export class TimelineController {
     this.#resize();
     this.setWaveform(this.#waveform);
     this.setAttacks(this.#attacks);
+    this.setGrid(this.#grid);
+    this.setLoop(this.#loop);
     this.#publishView();
     return () => {
       for (const cleanup of cleanups) cleanup();
@@ -214,7 +321,7 @@ export class TimelineController {
     this.#announce(time);
 
     const hover = this.#hover;
-    const key = `${time}|${view.start}|${view.span}|${hover?.surface}|${hover?.time}`;
+    const key = `${time}|${view.start}|${view.span}|${hover?.surface}|${hover?.time}|${this.#version}`;
     if (key === this.#drawn) return;
     this.#drawn = key;
     this.#palette ??= readPalette(this.#surfaces.detail?.canvas ?? document.documentElement);
@@ -254,14 +361,27 @@ export class TimelineController {
     if (event.button !== 0 || !video) return;
     event.preventDefault();
     surface.canvas.setPointerCapture(event.pointerId);
+    const x = this.#xOf(surface, event);
+    const common = { surface: surface.name, pointer: event.pointerId };
+    if (event.shiftKey) {
+      const candidates = surface.name === "detail" ? this.#snapCandidates(null) : [];
+      const anchor = this.#snap(surface, this.#timeAt(surface, x), candidates, event.altKey);
+      this.#drag = { ...common, mode: "range", anchor, candidates };
+      return;
+    }
+    const handle = this.#handleAt(surface, x);
+    if (handle) {
+      this.#drag = { ...common, mode: "handle", handle, candidates: this.#snapCandidates(handle) };
+      return;
+    }
     this.#drag = {
-      surface: surface.name,
-      pointer: event.pointerId,
+      ...common,
+      mode: "seek",
       startX: event.clientX,
       wasPlaying: !video.paused,
       scrubbing: false,
     };
-    this.#seek(this.#timeAt(surface, this.#xOf(surface, event)));
+    this.#seek(this.#timeAt(surface, x));
   }
 
   #pointerMove(surface: Surface, event: PointerEvent): void {
@@ -269,12 +389,25 @@ export class TimelineController {
     const time = this.#timeAt(surface, x);
     const drag = this.#drag;
     if (drag && drag.pointer === event.pointerId) {
-      if (!drag.scrubbing && Math.abs(event.clientX - drag.startX) >= DRAG_THRESHOLD) {
-        drag.scrubbing = true;
-        // Scrubbing pauses; the video plays on from the new place on release.
-        if (drag.wasPlaying) this.#video()?.pause();
+      if (drag.mode === "seek") {
+        if (!drag.scrubbing && Math.abs(event.clientX - drag.startX) >= DRAG_THRESHOLD) {
+          drag.scrubbing = true;
+          // Scrubbing pauses; the video plays on from the new place on release.
+          if (drag.wasPlaying) this.#video()?.pause();
+        }
+        if (drag.scrubbing) this.#seek(time);
+      } else if (drag.mode === "range") {
+        const other = this.#snap(surface, time, drag.candidates, event.altKey);
+        const start = Math.min(drag.anchor, other);
+        const end = Math.max(drag.anchor, other);
+        this.#setPreview({ loop: { start, end, enabled: true } });
+      } else {
+        this.#setPreview(
+          this.#moved(drag.handle, this.#snap(surface, time, drag.candidates, event.altKey)),
+        );
       }
-      if (drag.scrubbing) this.#seek(time);
+    } else if (surface.name === "detail") {
+      surface.canvas.style.cursor = this.#handleAt(surface, x) ? "ew-resize" : "";
     }
     this.#setHover({ surface: surface.name, time, x, width: surface.width });
   }
@@ -286,10 +419,102 @@ export class TimelineController {
     if (surface.canvas.hasPointerCapture(event.pointerId)) {
       surface.canvas.releasePointerCapture(event.pointerId);
     }
-    if (drag.scrubbing && drag.wasPlaying)
-      this.#video()
-        ?.play()
-        .catch(() => {});
+    const preview = this.#preview;
+    this.#setPreview(null);
+    if (drag.mode === "seek") {
+      if (drag.scrubbing && drag.wasPlaying)
+        this.#video()
+          ?.play()
+          .catch(() => {});
+      return;
+    }
+    if (preview?.loop && preview.loop.end - preview.loop.start >= MIN_LOOP_SECONDS) {
+      this.#handlers?.onLoopChange(preview.loop);
+    }
+    if (preview?.marker) {
+      const { id, start, end } = preview.marker;
+      this.#handlers?.onMarkerMove(id, start, end);
+    }
+  }
+
+  /** The loop edge or marker under `x` on the detail view, if any. */
+  #handleAt(surface: Surface, x: number): Handle | null {
+    if (surface.name !== "detail") return null;
+    const near = (time: number) =>
+      Math.abs(xAt(this.#view, time, surface.width) - x) <= GRAB_PIXELS;
+    const loop = this.#loop;
+    if (loop && near(loop.start)) return { kind: "loop", edge: "start" };
+    if (loop && near(loop.end)) return { kind: "loop", edge: "end" };
+    for (const marker of this.#markers) {
+      if (marker.kind === "loop") continue;
+      if (near(marker.start)) return { kind: "marker", id: marker.id, edge: "start" };
+      if (marker.end !== null && near(marker.end))
+        return { kind: "marker", id: marker.id, edge: "end" };
+    }
+    return null;
+  }
+
+  /** What dragging `handle` to `time` changes. */
+  #moved(handle: Handle, time: number): Preview | null {
+    if (handle.kind === "loop") {
+      const loop = this.#loop;
+      if (!loop) return null;
+      return handle.edge === "start"
+        ? { loop: { ...loop, start: Math.min(time, loop.end - MIN_LOOP_SECONDS), enabled: true } }
+        : { loop: { ...loop, end: Math.max(time, loop.start + MIN_LOOP_SECONDS), enabled: true } };
+    }
+    const marker = this.#markers.find((item) => item.id === handle.id);
+    if (!marker) return null;
+    if (marker.end === null) return { marker: { id: marker.id, start: time, end: null } };
+    return handle.edge === "start"
+      ? {
+          marker: {
+            id: marker.id,
+            start: Math.min(time, marker.end - MIN_LOOP_SECONDS),
+            end: marker.end,
+          },
+        }
+      : {
+          marker: {
+            id: marker.id,
+            start: marker.start,
+            end: Math.max(time, marker.start + MIN_LOOP_SECONDS),
+          },
+        };
+  }
+
+  /** Beats, attacks, markers and loop edges in view (except what is being dragged), in order. */
+  #snapCandidates(dragged: Handle | null): number[] {
+    const view = this.#view;
+    const end = view.start + view.span;
+    const times: number[] = [];
+    if (this.#grid) {
+      for (const line of gridLines(this.#grid, view.start, end)) times.push(line.time);
+    }
+    const attacks = this.#attacks?.times ?? [];
+    for (let index = firstAtOrAfter(attacks, view.start); index < attacks.length; index++) {
+      const time = attacks[index] ?? 0;
+      if (time > end) break;
+      times.push(time);
+    }
+    const others = this.#markers.filter(
+      (marker) => dragged?.kind !== "marker" || marker.id !== dragged.id,
+    );
+    times.push(...markerTimes(others));
+    if (this.#loop && dragged?.kind !== "loop") times.push(this.#loop.start, this.#loop.end);
+    return times.sort((a, b) => a - b);
+  }
+
+  /** `time` snapped to the nearest candidate within reach, unless Alt is held. */
+  #snap(surface: Surface, time: number, candidates: readonly number[], free: boolean): number {
+    if (free || surface.name !== "detail") return time;
+    const radius = (SNAP_PIXELS / (surface.width || 1)) * this.#view.span;
+    return snapTo(time, candidates, radius);
+  }
+
+  #setPreview(preview: Preview | null): void {
+    this.#preview = preview;
+    this.#version++;
   }
 
   #wheel(surface: Surface, event: WheelEvent): void {
@@ -338,6 +563,7 @@ export class TimelineController {
     if (view.start === this.#view.start && view.span === this.#view.span) return;
     this.#view = view;
     this.#publishView();
+    for (const listener of this.#viewListeners) listener();
   }
 
   #publishView(): void {
@@ -402,7 +628,10 @@ export class TimelineController {
     const context = this.#begin(surface);
     const whole = this.#whole();
     const playX = xAt(whole, time, surface.width);
+    this.#drawSections(surface, whole, 0, surface.height, false);
     this.#drawWave(surface, palette, whole, 3, surface.height - 3, playX);
+    this.#drawLoop(surface, whole, false);
+    this.#drawPoints(surface, whole, false);
 
     // The stretch shown in the detail view.
     const left = xAt(whole, this.#view.start, surface.width);
@@ -461,10 +690,136 @@ export class TimelineController {
     const top = RULER_HEIGHT + 4;
     const bottom = surface.height - 4;
     const playX = xAt(view, time, width);
+    this.#drawSections(surface, view, RULER_HEIGHT + 1, surface.height, true);
+    this.#drawGrid(surface, palette, view, false);
     this.#drawWave(surface, palette, view, top, bottom, playX);
+    this.#drawGrid(surface, palette, view, true);
     this.#drawAttacks(surface, view, bottom);
+    this.#drawLoop(surface, view, true);
+    this.#drawPoints(surface, view, true);
     this.#drawHover(surface, palette, view);
     this.#drawPlayhead(surface, palette, playX, true);
+  }
+
+  #currentLoop(): Loop | null {
+    return this.#preview?.loop ?? this.#loop;
+  }
+
+  /** Markers with the one being dragged at its new place. */
+  #currentMarkers(): readonly MarkerItem[] {
+    const moved = this.#preview?.marker;
+    if (!moved) return this.#markers;
+    return this.#markers.map((marker) =>
+      marker.id === moved.id ? { ...marker, start: moved.start, end: moved.end } : marker,
+    );
+  }
+
+  /**
+   * Beat lines and brighter bar lines under the waveform, or (`labels`) the bar numbers over
+   * it, so the waveform never hides them.
+   */
+  #drawGrid(surface: Surface, palette: Palette, view: View, labels: boolean): void {
+    const grid = this.#grid;
+    if (!grid) return;
+    const { context, width } = surface;
+    const lines = gridLines(grid, view.start, view.start + view.span);
+    const spacing = lines.length > 1 ? width / (lines.length - 1) : width;
+    context.fillStyle = palette.played;
+    context.font = palette.font;
+    context.textBaseline = "top";
+    let lastLabel = Number.NEGATIVE_INFINITY;
+    for (const line of lines) {
+      const x = Math.round(xAt(view, line.time, width));
+      if (labels) {
+        if (line.bar !== null && x - lastLabel >= 24) {
+          context.globalAlpha = 0.85;
+          context.fillText(String(line.bar), x + 3, surface.height - 13);
+          lastLabel = x;
+        }
+        continue;
+      }
+      if (line.bar === null && spacing < BEAT_LINE_SPACING) continue;
+      context.globalAlpha = line.bar === null ? 0.1 : 0.28;
+      context.fillRect(x, RULER_HEIGHT + 1, 1, surface.height - RULER_HEIGHT - 1);
+    }
+    context.globalAlpha = 1;
+  }
+
+  /** Sections as coloured stretches, named in a band under the ruler in the detail view. */
+  #drawSections(surface: Surface, view: View, top: number, bottom: number, named: boolean): void {
+    const { context, width } = surface;
+    for (const marker of this.#currentMarkers()) {
+      if (marker.kind !== "section" || marker.end === null) continue;
+      const left = xAt(view, marker.start, width);
+      const right = xAt(view, marker.end, width);
+      if (right < 0 || left > width) continue;
+      const color = marker.color ?? DEFAULT_MARKER_COLOR;
+      context.fillStyle = color;
+      context.globalAlpha = named ? 0.08 : 0.2;
+      context.fillRect(left, top, right - left, bottom - top);
+      if (!named) continue;
+      context.globalAlpha = 0.55;
+      context.fillRect(left, top, right - left, SECTION_BAND);
+      context.globalAlpha = 1;
+      context.fillStyle = "#fff";
+      context.font = this.#palette?.font ?? "10px sans-serif";
+      context.textBaseline = "top";
+      const label = marker.label || `§${marker.number ?? ""}`;
+      context.save();
+      context.beginPath();
+      context.rect(left, top, right - left, SECTION_BAND);
+      context.clip();
+      context.fillText(label, Math.max(left, 0) + 4, top + 1.5);
+      context.restore();
+    }
+    context.globalAlpha = 1;
+  }
+
+  /** The loop: shaded when on, outlined when off; in the detail view with grabbable edges. */
+  #drawLoop(surface: Surface, view: View, handles: boolean): void {
+    const loop = this.#currentLoop();
+    if (!loop) return;
+    const { context, width, height } = surface;
+    const left = xAt(view, loop.start, width);
+    const right = xAt(view, loop.end, width);
+    if (right < 0 || left > width) return;
+    context.fillStyle = LOOP_COLOR;
+    context.strokeStyle = LOOP_COLOR;
+    context.globalAlpha = loop.enabled ? 0.16 : 0.06;
+    context.fillRect(left, 0, right - left, height);
+    context.globalAlpha = loop.enabled ? 0.9 : 0.45;
+    context.fillRect(Math.round(left) - 1, 0, 2, height);
+    context.fillRect(Math.round(right) - 1, 0, 2, height);
+    if (handles) {
+      // Brackets in the ruler, to grab the edges.
+      context.fillRect(left - 1, 0, 8, 3);
+      context.fillRect(right - 7, 0, 8, 3);
+    }
+    context.globalAlpha = 1;
+  }
+
+  /** Point markers: a line and, in the detail view, a numbered flag in the ruler. */
+  #drawPoints(surface: Surface, view: View, flags: boolean): void {
+    const { context, width, height } = surface;
+    for (const marker of this.#currentMarkers()) {
+      if (marker.kind !== "point") continue;
+      const x = Math.round(xAt(view, marker.start, width));
+      if (x < -60 || x > width) continue;
+      const color = marker.color ?? DEFAULT_MARKER_COLOR;
+      context.fillStyle = color;
+      context.globalAlpha = 0.9;
+      context.fillRect(x, flags ? RULER_HEIGHT : 0, 1.5, height);
+      if (!flags) continue;
+      const label = marker.label ? `${marker.number} ${marker.label}` : String(marker.number ?? "");
+      context.font = this.#palette?.font ?? "10px sans-serif";
+      const textWidth = context.measureText(label).width;
+      context.globalAlpha = 1;
+      context.fillRect(x, 1, textWidth + 8, RULER_HEIGHT - 3);
+      context.fillStyle = "#111";
+      context.textBaseline = "top";
+      context.fillText(label, x + 4, 3);
+    }
+    context.globalAlpha = 1;
   }
 
   #begin(surface: Surface): CanvasRenderingContext2D {

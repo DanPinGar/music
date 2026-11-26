@@ -705,6 +705,9 @@ async function smoke() {
 
     const area = await detail.boundingBox();
     const span = async () => Number(await detail.getAttribute("data-span"));
+    // The zoom outlives the test library (localStorage): start from the whole clip.
+    await app.keyboard.press("Control+0");
+    await sleep(100);
     const before = await span();
     if (area) {
       await app.mouse.move(area.x + area.width * 0.3, area.y + area.height / 2);
@@ -733,6 +736,204 @@ async function smoke() {
     check("hovering the detail view previews the exact frame", exact);
     await COMMANDS.ss("smoke-4-player");
     await app.mouse.move(0, 0);
+
+    // Beat grid by tap tempo, stepping by beat, go-to, history, markers, loops, memory.
+    const seekTo = (time) =>
+      app.evaluate((t) => {
+        document.querySelector("[data-testid=player-video]").currentTime = t;
+      }, time);
+    const timeNow = async () => (await videoState(app))?.time ?? -1;
+    const goTo = async (text) => {
+      await app.keyboard.press("G");
+      await app.waitForSelector("[cmdk-input]:focus", { timeout: 3_000 });
+      await app.keyboard.type(text, { delay: 20 });
+      await sleep(150);
+      await app.keyboard.press("Enter");
+      // Until the dialog has gone, keys belong to it.
+      await app.waitForSelector("[data-slot=dialog-content]", {
+        state: "detached",
+        timeout: 3_000,
+      });
+      await sleep(100);
+    };
+
+    await seekTo(0.3);
+    await app.evaluate(() => document.querySelector("[data-testid=player-video]").play());
+    await sleep(150);
+    for (let tap = 0; tap < 4; tap++) {
+      await app.keyboard.press("T");
+      await sleep(500);
+    }
+    await app.keyboard.press("Space");
+    await sleep(300);
+    const beats = ((await detail.getAttribute("data-grid")) ?? "")
+      .split(",")
+      .filter(Boolean)
+      .map(Number);
+    const position = squash(await app.locator("[data-testid=grid-position]").innerText());
+    check(
+      '"T" taps a beat grid while playing',
+      beats.length >= 3 && /\d+\.\d/.test(position),
+      `${beats.length} beats: ${position}`,
+    );
+
+    await app.keyboard.press("S");
+    await app.keyboard.press("Home");
+    await app.keyboard.press("ArrowRight");
+    await sleep(250);
+    // The first beat after 0: tapped, or extrapolated before the first tap.
+    const period =
+      beats.length > 1
+        ? (beats[Math.min(4, beats.length - 1)] - beats[0]) / Math.min(4, beats.length - 1)
+        : 0.5;
+    let firstBeat = beats[0] ?? 0;
+    while (firstBeat - period > 0.001) firstBeat -= period;
+    const onBeat = await timeNow();
+    const unit = squash(await app.locator("[data-testid=step-unit]").innerText());
+    check(
+      '"S" steps by beat: "→" lands on the first beat',
+      Math.abs(onBeat - firstBeat) < 0.002,
+      `${unit}, t = ${onBeat.toFixed(3)} for ${firstBeat.toFixed(3)}`,
+    );
+    await app.keyboard.press("S");
+    await app.keyboard.press("S");
+
+    await goTo("3.5");
+    const went = await timeNow();
+    check('"G" goes to a typed time', Math.abs(went - 3.5) < 0.01, `t = ${went.toFixed(3)}`);
+
+    await goTo("4.5");
+    await sleep(1000);
+    await app.keyboard.press("Home");
+    await sleep(1000);
+    await app.keyboard.press("Alt+ArrowLeft");
+    await sleep(300);
+    const back = await timeNow();
+    await app.keyboard.press("Alt+ArrowRight");
+    await sleep(300);
+    const forward = await timeNow();
+    check(
+      '"Alt+←" goes back to before the last jump and "Alt+→" returns',
+      Math.abs(back - 4.5) < 0.01 && forward < 0.01,
+      `t = ${back.toFixed(3)}, then ${forward.toFixed(3)}`,
+    );
+
+    await seekTo(1.25);
+    await sleep(200);
+    await app.keyboard.press("M");
+    await app
+      .waitForFunction(
+        () => document.querySelector("[data-testid=markers-toggle]")?.textContent?.endsWith("1"),
+        null,
+        { timeout: 5_000 },
+      )
+      .catch(() => {});
+    await app.keyboard.press("Home");
+    await app.keyboard.press("1");
+    await sleep(250);
+    const atMarker = await timeNow();
+    check(
+      '"M" adds a marker and "1" jumps to it',
+      Math.abs(atMarker - 1.25) < 0.01,
+      `t = ${atMarker.toFixed(3)}`,
+    );
+
+    await seekTo(1);
+    await sleep(150);
+    await app.keyboard.press("A");
+    await seekTo(2);
+    await sleep(150);
+    await app.keyboard.press("B");
+    await sleep(150);
+    const loopRange = await detail.getAttribute("data-loop");
+    await app.keyboard.press("Home");
+    await sleep(200);
+    await app.keyboard.press("Space");
+    await sleep(2_600);
+    const looping = await videoState(app);
+    await app.keyboard.press("Space");
+    const loopText = squash(await app.locator("[data-testid=loop-state]").innerText());
+    const gaps = ((await app.getAttribute("[data-testid=player-video]", "data-loop-gaps")) ?? "")
+      .split(",")
+      .filter(Boolean)
+      .map(Number);
+    check(
+      '"A" and "B" set a loop that plays round and round',
+      loopRange === "1.000-2.000" &&
+        /×[3-9]/.test(loopText) &&
+        (looping?.time ?? 0) >= 1 &&
+        (looping?.time ?? 0) < 2.05,
+      `${loopText}, gaps ${gaps.join("/")} ms`,
+    );
+
+    await sleep(1_500); // the state is saved a second after the last change
+    await app.reload();
+    const restored = await app
+      .waitForFunction(
+        () =>
+          document.querySelector("[data-testid=timeline-detail]")?.getAttribute("data-loop") ===
+          "1.000-2.000",
+        null,
+        { timeout: 15_000 },
+      )
+      .then(
+        () => true,
+        () => false,
+      );
+    await sleep(500);
+    const reopened = squash(await app.locator("[data-testid=grid-position]").innerText());
+    const markersAfter = squash(await app.locator("[data-testid=markers-toggle]").innerText());
+    check(
+      "the video reopens with its loop, beat grid and markers",
+      restored && /\d+\.\d/.test(reopened) && markersAfter.endsWith("1"),
+      `${reopened}; ${markersAfter}`,
+    );
+    await COMMANDS.ss("smoke-5-study");
+
+    // Timeline gestures: Shift + drag, edges that snap (Alt: free), double-click.
+    await app.keyboard.press("Shift+R"); // no loop
+    await app.keyboard.press("Control+0");
+    await sleep(150);
+    const loopAttr = () => detail.getAttribute("data-loop");
+    await COMMANDS.drag("[data-testid=timeline-detail] 0.19 0.41 Shift");
+    const drawn2 = await loopAttr();
+    await COMMANDS.drag("[data-testid=timeline-detail] 0.41 0.495");
+    const snapped = await loopAttr();
+    await COMMANDS.drag("[data-testid=timeline-detail] 0.498 0.495 Alt");
+    const free = await loopAttr();
+    check(
+      "Shift + drag makes a loop whose edges drag and snap to the attacks (Alt: no snapping)",
+      drawn2 === "0.990-2.050" && snapped === "0.990-2.490" && free === "0.990-2.475",
+      `${drawn2}, ${snapped}, ${free}`,
+    );
+
+    const count = async () =>
+      Number(
+        squash(await app.locator("[data-testid=markers-toggle]").innerText()).match(/\d+$/)?.[0],
+      );
+    const markersBefore = await count();
+    await COMMANDS["dblclick-at"]("[data-testid=timeline-detail] 0.8 0.7");
+    await sleep(600);
+    check(
+      "a double-click on the timeline adds a marker",
+      (await count()) === markersBefore + 1,
+      `${markersBefore} -> ${await count()}`,
+    );
+
+    await app.click("[data-testid=return-on-pause]");
+    await seekTo(3);
+    await sleep(200);
+    await app.keyboard.press("Space");
+    await sleep(700);
+    await app.keyboard.press("Space");
+    await sleep(300);
+    const returned = await timeNow();
+    await app.click("[data-testid=return-on-pause]");
+    check(
+      "with return-on-pause, pausing goes back to where playback started",
+      Math.abs(returned - 3) < 0.01,
+      `t = ${returned.toFixed(3)}`,
+    );
   }
   check(
     "no console errors, warnings or failed requests",
@@ -791,6 +992,40 @@ const COMMANDS = {
     if (!box) throw new Error(`${selector} is not visible`);
     await need().mouse.move(box.x + box.width * Number(fx), box.y + box.height * Number(fy));
     log(`mouse over ${selector} at ${fx}, ${fy}`);
+  },
+  /** A real mouse click on an element (it moves the focus, unlike `click`). */
+  async "click-at"(args) {
+    const [selector, fx = "0.5", fy = "0.5"] = args.split(" ");
+    const box = await need().locator(selector).boundingBox();
+    if (!box) throw new Error(`${selector} is not visible`);
+    await need().mouse.click(box.x + box.width * Number(fx), box.y + box.height * Number(fy));
+    log(`mouse click on ${selector} at ${fx}, ${fy}`);
+  },
+  /** A real double-click on an element, at fractions of its size. */
+  async "dblclick-at"(args) {
+    const [selector, fx = "0.5", fy = "0.5"] = args.split(" ");
+    const box = await need().locator(selector).boundingBox();
+    if (!box) throw new Error(`${selector} is not visible`);
+    await need().mouse.dblclick(box.x + box.width * Number(fx), box.y + box.height * Number(fy));
+    log(`double-click on ${selector} at ${fx}, ${fy}`);
+  },
+  /**
+   * Drags across an element from one fraction of its width to another, at half its height,
+   * optionally holding Shift or Alt: `drag [data-testid=timeline-detail] 0.2 0.4 Shift`.
+   */
+  async drag(args) {
+    const [selector, from = "0.3", to = "0.6", modifier] = args.split(" ");
+    const app = need();
+    const box = await app.locator(selector).boundingBox();
+    if (!box) throw new Error(`${selector} is not visible`);
+    const y = box.y + box.height / 2;
+    if (modifier) await app.keyboard.down(modifier);
+    await app.mouse.move(box.x + box.width * Number(from), y);
+    await app.mouse.down();
+    await app.mouse.move(box.x + box.width * Number(to), y, { steps: 12 });
+    await app.mouse.up();
+    if (modifier) await app.keyboard.up(modifier);
+    log(`dragged ${selector} from ${from} to ${to}${modifier ? ` with ${modifier}` : ""}`);
   },
   async wait(selector) {
     await need().waitForSelector(selector, { timeout: 10_000 });

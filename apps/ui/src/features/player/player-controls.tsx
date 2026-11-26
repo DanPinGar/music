@@ -6,14 +6,20 @@ import {
   PinIcon,
   PlayIcon,
   PlusIcon,
+  Undo2Icon,
   ZoomInIcon,
   ZoomOutIcon,
 } from "lucide-react";
 import { type MouseEvent, type RefObject, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
+import { useStore } from "zustand";
 import { useCommandRegistry } from "@/commands/commands-context";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { DEFAULT_MARKER_COLOR, type MarkerItem, sectionAt } from "./markers";
 import { formatTimecode } from "./navigation";
+import type { PlayerRuntime } from "./player-runtime";
+import { GridControl, LoopControl } from "./practice-controls";
 import type { TimelineController } from "./timeline/timeline-controller";
 import type { FollowMode } from "./timeline/view";
 import { usePlayback } from "./use-playback";
@@ -31,22 +37,30 @@ const FOLLOW_ICONS: Record<FollowMode, typeof PinIcon> = {
 export function PlayerControls({
   videoRef,
   timeline,
+  runtime,
+  markers,
 }: {
   videoRef: RefObject<HTMLVideoElement | null>;
   timeline: TimelineController;
+  runtime: PlayerRuntime;
+  markers: readonly MarkerItem[];
 }) {
   const { t } = useTranslation();
   const registry = useCommandRegistry();
   const playback = usePlayback(videoRef);
   const { follow } = useSyncExternalStore(timeline.subscribe, timeline.getState);
+  const stepUnit = useStore(runtime.session, (state) => state.stepUnit);
+  const returnOnPause = useStore(runtime.session, (state) => state.returnOnPause);
   const FollowIcon = FOLLOW_ICONS[follow];
   const run = (command: string) => (event: MouseEvent<HTMLButtonElement>) => {
     event.currentTarget.blur();
     registry.execute(command);
   };
+  const frame = Math.floor(playback.time * runtime.fps + 1e-6);
+  const section = sectionAt(markers, playback.time);
 
   return (
-    <div className="flex h-12 shrink-0 items-center gap-3 border-t px-4">
+    <div className="flex h-12 shrink-0 items-center gap-2 border-t px-4">
       <Button
         variant="ghost"
         size="icon"
@@ -59,8 +73,54 @@ export function PlayerControls({
         {formatTimecode(playback.time, playback.paused)}
         <span className="text-muted-foreground"> / {formatTimecode(playback.duration)}</span>
       </span>
+      {playback.paused && (
+        <span
+          className="shrink-0 font-mono text-xs text-muted-foreground tabular-nums"
+          title={t("player.frame")}
+          data-testid="player-frame"
+        >
+          f{frame}
+        </span>
+      )}
+      <div className="ml-2 flex min-w-0 items-center gap-1">
+        <GridControl runtime={runtime} time={playback.time} />
+        <Button
+          variant="ghost"
+          className="h-7 px-2 font-mono text-xs text-muted-foreground hover:text-foreground"
+          title={t("commands.cycleStepUnit")}
+          onClick={run("player.cycleStepUnit")}
+          data-testid="step-unit"
+        >
+          {t("player.step", { unit: t(`player.stepUnits.${stepUnit}`) })}
+        </Button>
+        <LoopControl runtime={runtime} />
+        {section && (
+          <span
+            className="flex min-w-0 items-center gap-1.5 truncate px-2 text-xs"
+            data-testid="current-section"
+          >
+            <span
+              className="size-2 shrink-0 rounded-full"
+              style={{ background: section.color ?? DEFAULT_MARKER_COLOR }}
+            />
+            <span className="truncate">{section.label || `§${section.number}`}</span>
+          </span>
+        )}
+      </div>
       <div className="flex-1" />
       <div className="flex shrink-0 items-center gap-1">
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={t("commands.toggleReturnOnPause")}
+          aria-pressed={returnOnPause}
+          title={t("commands.toggleReturnOnPause")}
+          className={cn(returnOnPause && "bg-muted text-foreground")}
+          onClick={run("player.toggleReturnOnPause")}
+          data-testid="return-on-pause"
+        >
+          <Undo2Icon />
+        </Button>
         <Button
           variant="ghost"
           size="icon-sm"

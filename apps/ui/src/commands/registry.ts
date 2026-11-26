@@ -23,7 +23,13 @@ export interface Command {
   readonly hiddenInPalette?: boolean;
   /** Whether the command can run right now. Shortcuts skip disabled commands. */
   readonly enabled?: () => boolean;
-  readonly run: () => void;
+  /** `trigger` says which key ran it (one command may answer several: "1" … "9"). */
+  readonly run: (trigger?: CommandTrigger) => void;
+}
+
+export interface CommandTrigger {
+  /** The normalised binding pressed, e.g. "3". */
+  readonly binding: string;
 }
 
 type Listener = () => void;

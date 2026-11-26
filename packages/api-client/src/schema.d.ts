@@ -109,6 +109,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/videos/{id}/markers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The video's markers, in time order. */
+        get: operations["list_markers"];
+        put?: never;
+        /** Adds a marker to the video. */
+        post: operations["create_marker"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/videos/{id}/markers/{marker_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Moves, renames or recolours a marker. */
+        put: operations["update_marker"];
+        post?: never;
+        /** Deletes a marker. */
+        delete: operations["delete_marker"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/videos/{id}/media": {
         parameters: {
             query?: never;
@@ -147,6 +183,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/videos/{id}/state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Where the user left the video; the defaults for a video never opened. */
+        get: operations["get_state"];
+        /** Saves where the user is in the video (the whole document). */
+        put: operations["put_state"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/videos/{id}/thumbnails": {
         parameters: {
             query?: never;
@@ -177,6 +231,21 @@ export interface components {
             /** Format: int32 */
             version: number;
         };
+        /**
+         * @description Beats tapped by the user. Before the first and after the last, the grid continues at the
+         *     tempo of its ends.
+         */
+        BeatGridDto: {
+            /** @description Times of the beats, strictly increasing. */
+            beats_ms: number[];
+            /** Format: int32 */
+            beats_per_bar: number;
+            /**
+             * Format: int32
+             * @description Index of a beat that starts bar 1 (it may lie outside `beats_ms`).
+             */
+            downbeat: number;
+        };
         /** @description Result of the liveness probe. */
         Health: {
             /** @description Always `ok` while the API is serving. */
@@ -189,6 +258,58 @@ export interface components {
             /** @description Title in the library; the file name when omitted. */
             title?: string | null;
         };
+        LoopRangeDto: {
+            enabled: boolean;
+            /** Format: int64 */
+            end_ms: number;
+            /** Format: int64 */
+            start_ms: number;
+        };
+        /** @description Every editable field of a marker (its kind cannot change). */
+        MarkerChangesDto: {
+            color?: string | null;
+            /** Format: int64 */
+            end_ms?: number | null;
+            label?: string;
+            /** Format: int64 */
+            start_ms: number;
+        };
+        /** @description A marker on a video's timeline. */
+        MarkerDto: {
+            /** @description `#rrggbb`; absent for the default colour. */
+            color?: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /**
+             * Format: int64
+             * @description End of a section or loop; absent for points.
+             */
+            end_ms?: number | null;
+            /** Format: uuid */
+            id: string;
+            kind: components["schemas"]["MarkerKindDto"];
+            /** @description May be empty: the UI then shows the marker's number. */
+            label: string;
+            /** Format: int64 */
+            start_ms: number;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /**
+         * @description A point to start from, a named section or a saved loop.
+         * @enum {string}
+         */
+        MarkerKindDto: "point" | "section" | "loop";
+        /** @description A new marker. */
+        NewMarkerDto: {
+            color?: string | null;
+            /** Format: int64 */
+            end_ms?: number | null;
+            kind: components["schemas"]["MarkerKindDto"];
+            label?: string;
+            /** Format: int64 */
+            start_ms: number;
+        };
         /** @description The audio waveform of a video, served by `/peaks`. */
         PeaksDto: {
             /** @description A minimum and a maximum per slot, in turn, from -127 to 127. */
@@ -200,6 +321,17 @@ export interface components {
             peaks_per_second: number;
             /** Format: int32 */
             version: number;
+        };
+        /** @description How loops are practised. */
+        PracticeDto: {
+            /** @description A bar of metronome clicks before playback starts. */
+            count_in: boolean;
+            /**
+             * Format: int32
+             * @description Beats played before the loop start on every repetition.
+             */
+            pre_roll_beats: number;
+            trainer?: null | components["schemas"]["SpeedTrainerDto"];
         };
         /** @description Progress of preparing a video for navigation. */
         PreparationDto: {
@@ -230,6 +362,20 @@ export interface components {
             /** @description URI identifying the problem type; `about:blank` when the status code says it all. */
             type: string;
         };
+        /** @description Speeds the loop up on every repetition: `from`, then `step` more each time, up to `to`. */
+        SpeedTrainerDto: {
+            /** Format: double */
+            from: number;
+            /** Format: double */
+            step: number;
+            /** Format: double */
+            to: number;
+        };
+        /**
+         * @description What the arrow keys step by.
+         * @enum {string}
+         */
+        StepUnitDto: "seconds" | "beat" | "bar";
         /** @description Facts about the running core, shown in the UI's status bar. */
         SystemInfo: {
             /** @description Version of the ffmpeg in use; `None` when it was not found. */
@@ -263,6 +409,12 @@ export interface components {
             tile_height: number;
             /** Format: int32 */
             tile_width: number;
+        };
+        TimelineViewDto: {
+            /** Format: int64 */
+            span_ms: number;
+            /** Format: int64 */
+            start_ms: number;
         };
         /** @description A video in the library. */
         VideoDto: {
@@ -302,6 +454,21 @@ export interface components {
          * @enum {string}
          */
         VideoSourceDto: "youtube" | "file";
+        /** @description Where the user left a video, so it reopens the same way. */
+        VideoStateDto: {
+            beat_grid?: null | components["schemas"]["BeatGridDto"];
+            loop?: null | components["schemas"]["LoopRangeDto"];
+            /** Format: int64 */
+            position_ms: number;
+            practice: components["schemas"]["PracticeDto"];
+            /**
+             * Format: double
+             * @description Playback rate, from 0.25 to 2 (1 is normal speed).
+             */
+            speed: number;
+            step_unit: components["schemas"]["StepUnitDto"];
+            view?: null | components["schemas"]["TimelineViewDto"];
+        };
         /**
          * @description Lifecycle of a library entry.
          * @enum {string}
@@ -527,6 +694,198 @@ export interface operations {
             };
         };
     };
+    list_markers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Video id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The markers */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarkerDto"][];
+                };
+            };
+            /** @description Missing or invalid token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description No such video */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    create_marker: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Video id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewMarkerDto"];
+            };
+        };
+        responses: {
+            /** @description The new marker */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarkerDto"];
+                };
+            };
+            /** @description Not a valid marker */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Missing or invalid token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description No such video */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    update_marker: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Video id */
+                id: string;
+                /** @description Marker id */
+                marker_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MarkerChangesDto"];
+            };
+        };
+        responses: {
+            /** @description The marker as saved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarkerDto"];
+                };
+            };
+            /** @description Not a valid marker */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Missing or invalid token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description No such video or marker */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    delete_marker: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Video id */
+                id: string;
+                /** @description Marker id */
+                marker_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description No such video or marker */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     get_media: {
         parameters: {
             query?: never;
@@ -604,6 +963,101 @@ export interface operations {
                 };
             };
             /** @description No such video, or no waveform yet */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    get_state: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Video id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The video's study state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoStateDto"];
+                };
+            };
+            /** @description Missing or invalid token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description No such video */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    put_state: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Video id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VideoStateDto"];
+            };
+        };
+        responses: {
+            /** @description The state as saved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoStateDto"];
+                };
+            };
+            /** @description The state makes no sense (e.g. a loop ending before it starts) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Missing or invalid token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description No such video */
             404: {
                 headers: {
                     [name: string]: unknown;

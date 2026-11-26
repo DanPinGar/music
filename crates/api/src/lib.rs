@@ -14,7 +14,9 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::middleware;
-use segno_domain::{MediaProbe, MediaStore, VideoRepository};
+use segno_domain::{
+    MarkerRepository, MediaProbe, MediaStore, VideoRepository, VideoStateRepository,
+};
 use serde::Serialize;
 use tokio::net::TcpListener;
 use tower_http::trace::TraceLayer;
@@ -32,6 +34,9 @@ pub use security::SecurityConfig;
 #[derive(Clone)]
 pub struct AppState {
     pub videos: Arc<dyn VideoRepository>,
+    /// Where the user left each video.
+    pub states: Arc<dyn VideoStateRepository>,
+    pub markers: Arc<dyn MarkerRepository>,
     /// The library's media files.
     pub media_files: Arc<dyn MediaStore>,
     /// Reads media files; `None` when ffmpeg is not available, so imports are refused.
@@ -65,7 +70,8 @@ pub struct SystemInfo {
     modifiers(&TokenScheme),
     tags(
         (name = "system", description = "Health and version of the core"),
-        (name = "videos", description = "Videos in the library")
+        (name = "videos", description = "Videos in the library"),
+        (name = "study", description = "Where the user left each video, and its markers")
     )
 )]
 struct ApiDoc;
@@ -96,6 +102,15 @@ fn protected_routes() -> OpenApiRouter<AppState> {
         .routes(routes!(routes::videos::get_thumbnails))
         .routes(routes!(routes::videos::get_peaks))
         .routes(routes!(routes::videos::get_attacks))
+        .routes(routes!(routes::state::get_state, routes::state::put_state))
+        .routes(routes!(
+            routes::markers::list_markers,
+            routes::markers::create_marker
+        ))
+        .routes(routes!(
+            routes::markers::update_marker,
+            routes::markers::delete_marker
+        ))
 }
 
 /// The OpenAPI document of the API (source of the generated TypeScript client).

@@ -2,7 +2,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Context;
-use segno_domain::{MediaPreparer, MediaProbe, MediaStore, VideoRepository};
+use segno_domain::{
+    MarkerRepository, MediaPreparer, MediaProbe, MediaStore, VideoRepository, VideoStateRepository,
+};
 use segno_media::{FfmpegPreparer, FfprobeProbe, MediaTools};
 use segno_storage::{LibraryFiles, SqliteStore};
 
@@ -34,6 +36,8 @@ pub async fn local_state(library_dir: &Path, tool_dirs: &[PathBuf]) -> anyhow::R
         schema_version: store.schema_version().await?,
         ffmpeg_version: tools.as_ref().map(|tools| tools.version.clone()),
     });
+    let states: Arc<dyn VideoStateRepository> = Arc::new(store.clone());
+    let markers: Arc<dyn MarkerRepository> = Arc::new(store.clone());
     let videos: Arc<dyn VideoRepository> = Arc::new(store);
     let media_files: Arc<dyn MediaStore> = Arc::new(LibraryFiles::new(library_dir));
 
@@ -57,6 +61,8 @@ pub async fn local_state(library_dir: &Path, tool_dirs: &[PathBuf]) -> anyhow::R
 
     Ok(AppState {
         videos,
+        states,
+        markers,
         media_files,
         probe,
         preparations,

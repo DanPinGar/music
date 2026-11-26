@@ -43,7 +43,7 @@ node .claude/skills/run-segno/driver.mjs --smoke        # dev mode: Vite + cargo
 node .claude/skills/run-segno/driver.mjs --smoke prod   # built app: real CSP and origin, ~25 s
 ```
 
-It prints `PASS`/`FAIL` for 26 checks:
+It prints `PASS`/`FAIL` for 36 checks:
 
 - the status bar fed by the API, the `Ctrl+K` palette running a command, the `?` dialog,
   `Ctrl+2`/`Ctrl+1` and the language toggle;
@@ -57,10 +57,21 @@ It prints `PASS`/`FAIL` for 26 checks:
 - the timeline: waveform drawn and 9 attacks for the 9 notes, `Shift+→`/`Shift+←` landing on
   the notes, a click on the overview jumping there, `Ctrl` + wheel zooming and `Ctrl+0` showing
   the whole clip, and the hover preview showing the exact frame;
+- studying:
+  - tapping `T` builds a beat grid, and `S` then `→` steps by beat;
+  - `G` goes to a typed time;
+  - `Alt+←`/`Alt+→` move through the history;
+  - `M` adds a marker and `1` jumps to it;
+  - `A`/`B` set a loop that wraps round (its wrap gaps are printed);
+  - after a reload the video reopens with its loop, grid and markers;
+- timeline gestures: Shift + drag makes a loop whose edges drag and snap to the attacks (`Alt`:
+  free), a double-click adds a marker, and return-on-pause goes back to where playback started;
 - no console errors or HTTP errors.
 
 The timeline's detail canvas exposes its state for tests: `data-start`, `data-span`,
-`data-follow`, `data-waveform` (`ready` or `none`) and `data-attacks` (how many).
+`data-follow`, `data-waveform` (`ready` or `none`), `data-attacks` (how many), `data-grid` (the
+beats, in seconds, comma-separated) and `data-loop` (`start-end`). The player video keeps the
+last loop wraps' gaps in `data-loop-gaps` (milliseconds).
 
 It saves screenshots, closes the app and exits 0 only if everything passed.
 
@@ -112,6 +123,8 @@ and the production build's output to `target/run-segno/build.log`.
 | `press <key>` | one key press, with Playwright names: `Space`, `Control+k`, `?`, `.`, `ArrowRight`, `Home` |
 | `type <text>` | type into the focused element |
 | `click <css>` / `click-text <text>` | click through the DOM (buttons, links, palette items) |
+| `click-at <css> [fx] [fy]` / `dblclick-at …` | a real mouse click or double-click at fractions of an element's size; unlike `click`, it moves the focus |
+| `drag <css> <from> <to> [Shift\|Alt]` | drag across an element between two fractions of its width, holding a modifier: `drag [data-testid=timeline-detail] 0.2 0.4 Shift` makes a loop |
 | `move <css> [fx] [fy]` | move the mouse over an element, at fractions of its size (default the centre), e.g. `move [data-testid=timeline-detail] 0.7 0.5` to hover the timeline |
 | `wait <css>` | wait up to 10 s for an element |
 | `text [css]` | visible text of an element, or of the whole page; the player's clock is `[data-testid=player-time]` |
@@ -158,8 +171,8 @@ pnpm dev   # builds and opens the window with hot reload; closing the window sto
 pnpm check
 ```
 
-Biome, both type checks, Vitest (60 tests), the UI build, rustfmt, clippy with warnings as
-errors, cargo test (66 tests, including real ffmpeg runs), Ruff, Pyright in strict mode and
+Biome, both type checks, Vitest (102 tests), the UI build, rustfmt, clippy with warnings as
+errors, cargo test (84 tests, including real ffmpeg runs), Ruff, Pyright in strict mode and
 pytest (7 tests). All pass. Set `SEGNO_REQUIRE_FFMPEG=1` to make the ffmpeg tests fail, instead
 of skipping, when `.tools/ffmpeg` is missing (CI does).
 
@@ -196,7 +209,16 @@ of skipping, when `.tools/ffmpeg` is missing (CI does).
   with a bare `video`.
 - **Zoom and follow mode outlive the test library.** The timeline keeps them in `localStorage`
   (`segno.timeline`), which `launch` does not wipe, so a new session may open zoomed in. Press
-  `Control+0` first when a check depends on the zoom.
+  `Control+0` first when a check depends on the zoom. Each smoke run zoomed in a little more
+  until a zoom check failed at the 0.5 s minimum. The markers panel (`segno.player.markersPanel`)
+  and return-on-pause (`segno.player`) persist the same way.
+- **Shortcuts are ignored while a dialog is open, opening or closing.** Keys pressed then belong
+  to the dialog. A second `G` pressed while the first go-to dialog was still closing once
+  swallowed every key that followed, failing six checks at random. Wait for
+  `[cmdk-input]:focus` before typing, and for `[data-slot=dialog-content]` to be detached before
+  the next key, as the smoke test's `goTo` does.
+- **`click` does not move the focus; `click-at` does.** `click` calls `element.click()`, which
+  is what most checks want. For focus-related bugs, reproduce with real mouse events.
 - **Right after an import, `/media` serves the original.** The player switches to the proxy when
   the preparation finishes (its URL gains `copy=seek-proxy`), keeping the position, speed and play
   state. Anything that measures or screenshots playback should wait for that, as `bench` does.
