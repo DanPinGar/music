@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use segno_domain::library::{self, PreparationStage};
-use segno_domain::{MediaPreparer, MediaStore, VideoId, VideoRepository};
+use segno_domain::{DomainError, MediaPreparer, MediaStore, VideoId, VideoRepository};
 use tokio::sync::mpsc;
 
 /// Where a video is in its preparation for navigation.
@@ -70,6 +70,10 @@ impl Preparations {
                 {
                     Ok(_) => {
                         tracing::info!(%id, seconds = started.elapsed().as_secs_f64(), "video prepared for navigation")
+                    }
+                    // Deleted while being prepared: remove what ffmpeg wrote meanwhile.
+                    Err(DomainError::NotFound { .. }) => {
+                        let _ = store.remove_all(id).await;
                     }
                     Err(err) => tracing::warn!(%id, error = %err, "preparing the video failed"),
                 }

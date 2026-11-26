@@ -11,7 +11,9 @@ import { ShortcutsDialog } from "@/commands/shortcuts-dialog";
 import { SegnoMark } from "@/components/segno-mark";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { DownloadDialog } from "@/features/library/download-dialog";
 import { useImportVideos } from "@/features/library/use-import-videos";
+import { ToolsDialog } from "@/features/tools/tools-dialog";
 import { currentLanguage, setLanguage } from "@/i18n";
 import { StatusBar } from "./status-bar";
 
@@ -28,6 +30,8 @@ export function AppShell() {
   const { importFiles, pickAndImport } = useImportVideos();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [downloadOpen, setDownloadOpen] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const inPlayer = pathname === "/player" || pathname.startsWith("/videos/");
@@ -66,6 +70,13 @@ export function AppShell() {
         run: () => void pickAndImport(),
       },
       {
+        id: "library.download",
+        title: "commands.downloadVideo",
+        group: "general",
+        keys: ["Ctrl+D"],
+        run: () => setDownloadOpen(true),
+      },
+      {
         id: "palette.open",
         title: "commands.openPalette",
         group: "general",
@@ -79,6 +90,12 @@ export function AppShell() {
         group: "general",
         keys: ["?"],
         run: () => setShortcutsOpen(true),
+      },
+      {
+        id: "tools.show",
+        title: "commands.showTools",
+        group: "general",
+        run: () => setToolsOpen(true),
       },
       {
         id: "language.toggle",
@@ -187,6 +204,8 @@ export function AppShell() {
       <StatusBar />
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
       <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
+      <DownloadDialog open={downloadOpen} onOpenChange={setDownloadOpen} />
+      <ToolsDialog open={toolsOpen} onOpenChange={setToolsOpen} />
     </div>
   );
 }

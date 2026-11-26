@@ -2,6 +2,7 @@
 //! zoom, beat grid, loop and practice settings.
 
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::{DomainError, Result, VideoId};
@@ -143,6 +144,14 @@ impl VideoState {
     }
 }
 
+/// How far the user got in a video, and when they last studied it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Studied {
+    pub video: VideoId,
+    pub position_ms: i64,
+    pub at: DateTime<Utc>,
+}
+
 /// Port: persistence of each video's study state.
 #[async_trait]
 pub trait VideoStateRepository: Send + Sync {
@@ -150,6 +159,9 @@ pub trait VideoStateRepository: Send + Sync {
     async fn get_state(&self, video: VideoId) -> Result<Option<VideoState>>;
 
     async fn save_state(&self, video: VideoId, state: &VideoState) -> Result<()>;
+
+    /// Every video that has a saved state: where it was left, and when.
+    async fn studied(&self) -> Result<Vec<Studied>>;
 }
 
 #[cfg(test)]

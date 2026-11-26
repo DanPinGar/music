@@ -4,11 +4,13 @@
 //! server will serve the same router. Every route except `/health` requires the
 //! session token (see [`SecurityConfig`]).
 
+mod downloads;
 mod error;
 mod local;
 mod preparations;
 mod routes;
 mod security;
+mod services;
 
 use std::sync::Arc;
 
@@ -18,6 +20,7 @@ use segno_domain::{
     CommentRepository, MarkerRepository, MediaProbe, MediaStore, VideoRepository,
     VideoStateRepository,
 };
+use segno_tools::ToolManager;
 use serde::Serialize;
 use tokio::net::TcpListener;
 use tower_http::trace::TraceLayer;
@@ -26,10 +29,12 @@ use utoipa::{Modify, OpenApi, ToSchema};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
+pub use downloads::{DownloadProgress, DownloadServices, Downloads};
 pub use error::{ApiError, Problem};
-pub use local::local_state;
+pub use local::{ToolsSetup, local_state};
 pub use preparations::{Preparations, Progress};
 pub use security::SecurityConfig;
+pub use services::{SharedServices, ToolServices, ToolVersions};
 
 /// Shared state for the handlers.
 #[derive(Clone)]
@@ -41,11 +46,28 @@ pub struct AppState {
     pub comments: Arc<dyn CommentRepository>,
     /// The library's media files.
     pub media_files: Arc<dyn MediaStore>,
-    /// Reads media files; `None` when ffmpeg is not available, so imports are refused.
-    pub probe: Option<Arc<dyn MediaProbe>>,
-    /// Prepares videos for navigation in the background; `None` without ffmpeg.
-    pub preparations: Option<Arc<Preparations>>,
+    /// What the external tools found so far make possible (imports, preparations, downloads).
+    pub services: Arc<SharedServices>,
+    /// Installs and updates the tools; `None` when the core only uses the tools it finds.
+    pub tools: Option<Arc<ToolManager>>,
     pub system: Arc<SystemInfo>,
+}
+
+impl AppState {
+    /// Reads media files; `None` while ffmpeg is missing, so imports are refused.
+    pub fn probe(&self) -> Option<Arc<dyn MediaProbe>> {
+        self.services.get().probe
+    }
+
+    /// Prepares videos for navigation; `None` while ffmpeg is missing.
+    pub fn preparations(&self) -> Option<Arc<Preparations>> {
+        self.services.get().preparations
+    }
+
+    /// Downloads from YouTube; `None` while yt-dlp (or ffmpeg) is missing.
+    pub fn downloads(&self) -> Option<Arc<Downloads>> {
+        self.services.get().downloads
+    }
 }
 
 /// Facts about the running core, shown in the UI's status bar.
@@ -59,8 +81,10 @@ pub struct SystemInfo {
     pub library_path: Option<String>,
     /// Latest database migration applied.
     pub schema_version: i64,
-    /// Version of the ffmpeg in use; `None` when it was not found.
+    /// Version of the ffmpeg in use; `None` while it is missing (no imports).
     pub ffmpeg_version: Option<String>,
+    /// Version of the yt-dlp in use; `None` while it is missing (no YouTube downloads).
+    pub ytdlp_version: Option<String>,
 }
 
 #[derive(OpenApi)]
@@ -73,7 +97,8 @@ pub struct SystemInfo {
     tags(
         (name = "system", description = "Health and version of the core"),
         (name = "videos", description = "Videos in the library"),
-        (name = "study", description = "Where the user left each video, and its markers")
+        (name = "study", description = "Where the user left each video, and its markers"),
+        (name = "tools", description = "The external tools the core runs, installed and updated by itself")
     )
 )]
 struct ApiDoc;
@@ -97,9 +122,17 @@ fn public_routes() -> OpenApiRouter<AppState> {
 fn protected_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(routes::system::get_system))
+        .routes(routes!(routes::tools::list_tools))
+        .routes(routes!(routes::tools::check_tools))
         .routes(routes!(routes::videos::list_videos))
-        .routes(routes!(routes::videos::get_video))
+        .routes(routes!(
+            routes::videos::get_video,
+            routes::videos::edit_video,
+            routes::videos::delete_video
+        ))
         .routes(routes!(routes::videos::import_video))
+        .routes(routes!(routes::videos::download_video))
+        .routes(routes!(routes::videos::retry_video))
         .routes(routes!(routes::videos::get_media))
         .routes(routes!(routes::videos::get_thumbnails))
         .routes(routes!(routes::videos::get_peaks))

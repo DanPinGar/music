@@ -1,31 +1,119 @@
 import { expectData, type Video } from "@segno/api-client";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
-import { FilePlusIcon } from "lucide-react";
+import { DownloadIcon, FilePlusIcon, SearchIcon, XIcon } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useApi } from "@/api/api-context";
+import {
+  dialogOpen,
+  isTypingTarget,
+  useCommandRegistry,
+  useCommands,
+} from "@/commands/commands-context";
+import type { Command } from "@/commands/registry";
 import { Shortcut } from "@/commands/shortcut";
 import { SegnoMark } from "@/components/segno-mark";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { formatDuration } from "@/lib/format";
-import { PreparationStatus } from "./preparation-status";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
+import {
+  allTags,
+  filterVideos,
+  LIBRARY_ORDERS,
+  type LibraryOrder,
+  sortVideos,
+  youtubeId,
+} from "./library-filters";
 import { useImportVideos } from "./use-import-videos";
-import { VideoThumbnail } from "./video-thumbnail";
+import { useLibraryActions } from "./use-library-actions";
+import { VideoCard } from "./video-card";
+
+const ORDER_KEY = "segno.library.order";
+
+function storedOrder(): LibraryOrder {
+  try {
+    const stored = localStorage.getItem(ORDER_KEY);
+    return LIBRARY_ORDERS.find((order) => order === stored) ?? "added";
+  } catch {
+    return "added";
+  }
+}
+
+function storeOrder(order: LibraryOrder): void {
+  try {
+    localStorage.setItem(ORDER_KEY, order);
+  } catch {
+    // Storage unavailable: the library opens sorted by date added.
+  }
+}
 
 /** Start screen: the videos downloaded or imported so far. */
 export function LibraryPage() {
   const { t } = useTranslation();
   const api = useApi();
+  const registry = useCommandRegistry();
   const { pickAndImport } = useImportVideos();
+  const { download } = useLibraryActions();
   const videos = useQuery({
     queryKey: ["videos"],
     queryFn: async () => expectData(await api.GET("/videos")),
-    // Follow preparations while any is running.
+    // Fresh on every visit: studying moves each video's position, and the core adds videos.
+    staleTime: 0,
+    // Follow downloads and preparations while any is running.
     refetchInterval: (query) =>
-      query.state.data?.some((video) => video.preparation) ? 1_000 : false,
+      query.state.data?.some((video) => video.preparation || video.download) ? 1_000 : false,
   });
+  const [query, setQuery] = useState("");
+  const [tag, setTag] = useState<string | null>(null);
+  const [order, setOrder] = useState(storedOrder);
+  const search = useRef<HTMLInputElement>(null);
+
+  // A YouTube link pasted anywhere in the library (outside text fields) is downloaded.
+  useEffect(() => {
+    function onPaste(event: ClipboardEvent) {
+      if (isTypingTarget(event.target) || dialogOpen()) return;
+      const text = event.clipboardData?.getData("text/plain") ?? "";
+      if (youtubeId(text) === null) return;
+      event.preventDefault();
+      void download(text.trim());
+    }
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [download]);
+
+  const commands = useMemo<Command[]>(
+    () => [
+      {
+        id: "library.search",
+        title: "commands.searchLibrary",
+        group: "general",
+        keys: ["Ctrl+F", "/"],
+        run: () => search.current?.focus(),
+      },
+    ],
+    [],
+  );
+  useCommands(commands);
+
+  const all = videos.data ?? [];
+  const tags = useMemo(() => allTags(all), [all]);
+  const shown = useMemo(
+    () => sortVideos(filterVideos(all, query, tag), order),
+    [all, query, tag, order],
+  );
+  const filtering = query.trim() !== "" || tag !== null;
+  const clearFilters = () => {
+    setQuery("");
+    setTag(null);
+  };
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6 p-6">
@@ -34,11 +122,18 @@ export function LibraryPage() {
           <h1 className="font-heading text-2xl font-semibold">{t("library.title")}</h1>
           <p className="text-sm text-muted-foreground">{t("library.subtitle")}</p>
         </div>
-        <Button onClick={() => void pickAndImport()}>
-          <FilePlusIcon />
-          {t("library.import")}
-          <Shortcut binding="Ctrl+O" className="ml-1" />
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => void pickAndImport()}>
+            <FilePlusIcon />
+            {t("library.import")}
+            <Shortcut binding="Ctrl+O" className="ml-1" />
+          </Button>
+          <Button onClick={() => registry.execute("library.download")} data-testid="download">
+            <DownloadIcon />
+            {t("library.download")}
+            <Shortcut binding="Ctrl+D" className="ml-1" />
+          </Button>
+        </div>
       </div>
 
       {videos.isPending && <p className="text-sm text-muted-foreground">{t("common.loading")}</p>}
@@ -57,8 +152,58 @@ export function LibraryPage() {
         </Card>
       )}
 
-      {videos.isSuccess && videos.data.length === 0 && <EmptyLibrary />}
-      {videos.isSuccess && videos.data.length > 0 && <VideoGrid videos={videos.data} />}
+      {videos.isSuccess && all.length === 0 && <EmptyLibrary />}
+      {videos.isSuccess && all.length > 0 && (
+        <>
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative min-w-60 flex-1">
+                <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  ref={search}
+                  type="search"
+                  value={query}
+                  onChange={(event) => setQuery(event.currentTarget.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      if (query !== "") setQuery("");
+                      else event.currentTarget.blur();
+                    }
+                  }}
+                  placeholder={t("library.search")}
+                  aria-label={t("library.search")}
+                  className="pl-8"
+                  data-testid="library-search"
+                />
+              </div>
+              <OrderMenu
+                order={order}
+                onChange={(next) => {
+                  setOrder(next);
+                  storeOrder(next);
+                }}
+              />
+              {filtering && (
+                <span className="text-xs text-muted-foreground">
+                  {t("library.count", { shown: shown.length, total: all.length })}
+                </span>
+              )}
+            </div>
+            {tags.length > 0 && <TagFilter tags={tags} active={tag} onChange={setTag} />}
+          </div>
+          {shown.length > 0 ? (
+            <VideoGrid videos={shown} activeTag={tag} onTag={setTag} />
+          ) : (
+            <div className="flex flex-col items-center gap-3 py-12 text-sm text-muted-foreground">
+              {t("library.noMatches")}
+              <Button variant="outline" size="sm" onClick={clearFilters}>
+                <XIcon />
+                {t("library.clearFilters")}
+              </Button>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -71,48 +216,97 @@ function EmptyLibrary() {
       <CardHeader className="w-full max-w-md">
         <CardTitle>{t("library.emptyTitle")}</CardTitle>
         <CardDescription>
-          {t("library.emptyBody")} <Shortcut binding="Ctrl+O" className="align-middle" />
+          {t("library.emptyBody")} <Shortcut binding="Ctrl+O" className="align-middle" />;{" "}
+          {t("library.emptyDownload")} <Shortcut binding="Ctrl+D" className="align-middle" />
         </CardDescription>
       </CardHeader>
     </Card>
   );
 }
 
-/** "1920×1080 · 60 fps" for the videos that have media. */
-function technicalLine(video: Video): string | undefined {
-  const parts: string[] = [];
-  if (video.width && video.height) parts.push(`${video.width}×${video.height}`);
-  if (video.fps) parts.push(`${Math.round(video.fps * 100) / 100} fps`);
-  return parts.length > 0 ? parts.join(" · ") : undefined;
+function OrderMenu({
+  order,
+  onChange,
+}: {
+  order: LibraryOrder;
+  onChange: (order: LibraryOrder) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={<Button variant="outline" aria-label={t("library.sort")} data-testid="sort" />}
+      >
+        {t(`library.orders.${order}`)}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-auto">
+        <DropdownMenuRadioGroup
+          value={order}
+          onValueChange={(value) => onChange(value as LibraryOrder)}
+        >
+          {LIBRARY_ORDERS.map((option) => (
+            <DropdownMenuRadioItem key={option} value={option}>
+              {t(`library.orders.${option}`)}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 }
 
-function VideoGrid({ videos }: { videos: Video[] }) {
+function TagFilter({
+  tags,
+  active,
+  onChange,
+}: {
+  tags: string[];
+  active: string | null;
+  onChange: (tag: string | null) => void;
+}) {
   const { t } = useTranslation();
+  const chip = (selected: boolean) =>
+    cn(
+      "rounded-full border px-2.5 py-0.5 text-xs transition-colors hover:bg-muted",
+      selected && "border-primary bg-primary/10 text-foreground",
+    );
+  return (
+    <div className="flex flex-wrap gap-1.5" data-testid="tag-filter">
+      <button type="button" className={chip(active === null)} onClick={() => onChange(null)}>
+        {t("library.allTags")}
+      </button>
+      {tags.map((tag) => {
+        const selected = active?.toLowerCase() === tag.toLowerCase();
+        return (
+          <button
+            key={tag}
+            type="button"
+            className={chip(selected)}
+            aria-pressed={selected}
+            onClick={() => onChange(selected ? null : tag)}
+          >
+            {tag}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function VideoGrid({
+  videos,
+  activeTag,
+  onTag,
+}: {
+  videos: Video[];
+  activeTag: string | null;
+  onTag: (tag: string | null) => void;
+}) {
   return (
     <ul className="grid grid-cols-[repeat(auto-fill,minmax(16rem,1fr))] gap-4">
       {videos.map((video) => (
         <li key={video.id}>
-          <Link
-            to="/videos/$videoId"
-            params={{ videoId: video.id }}
-            className="block rounded-xl outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-          >
-            <Card className="h-full gap-0 overflow-hidden pt-0 transition-colors hover:bg-muted/40">
-              <VideoThumbnail video={video} />
-              <CardHeader className="pt-4">
-                <CardTitle className="line-clamp-2">{video.title}</CardTitle>
-                <CardDescription className="flex flex-wrap items-center gap-2">
-                  <Badge variant={video.status === "failed" ? "destructive" : "secondary"}>
-                    {t(`library.status.${video.status}`)}
-                  </Badge>
-                  {video.duration_ms != null && <span>{formatDuration(video.duration_ms)}</span>}
-                  {technicalLine(video) && <span>{technicalLine(video)}</span>}
-                  {video.channel && <span className="truncate">{video.channel}</span>}
-                </CardDescription>
-                <PreparationStatus video={video} className="pt-1" />
-              </CardHeader>
-            </Card>
-          </Link>
+          <VideoCard video={video} activeTag={activeTag} onTag={onTag} />
         </li>
       ))}
     </ul>

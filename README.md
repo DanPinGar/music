@@ -37,7 +37,7 @@ Everything else stays inside the repository: `node_modules`, `engine/.venv` and 
 ```sh
 pnpm install                              # JavaScript dependencies (also installs the git hooks)
 uv sync --directory engine --all-groups   # engine/.venv: engine, dev tools, yt-dlp and Deno
-pnpm tools                                # ffmpeg (LGPL build) into .tools/ffmpeg
+pnpm tools                                # ffmpeg (LGPL), yt-dlp and Deno into .tools/ (`--update` updates them)
 pnpm dev                                  # run the desktop app with hot reload
 ```
 

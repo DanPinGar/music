@@ -57,11 +57,19 @@ async fn start_core(app: &tauri::AppHandle) -> anyhow::Result<ApiConfig> {
     let library_dir = std::env::var_os("SEGNO_LIBRARY_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| app_data.join("library"));
-    let mut tool_dirs = vec![app_data.join("tools").join("ffmpeg").join("bin")];
-    if cfg!(debug_assertions) {
-        tool_dirs.push(segno_media::dev_tools_dir());
+    // The core installs its tools (ffmpeg, yt-dlp, Deno) in the app's data folder and keeps
+    // them up to date. While developing it uses the repository's `.tools` instead, unless
+    // SEGNO_TOOLS_DIR points it at a throwaway folder to try installing them.
+    let tools_dir = std::env::var_os("SEGNO_TOOLS_DIR").map(PathBuf::from);
+    let mut roots = Vec::new();
+    if cfg!(debug_assertions) && tools_dir.is_none() {
+        roots.push(segno_media::dev_tools_root());
     }
-    let state = segno_api::local_state(&library_dir, &tool_dirs).await?;
+    let tools = segno_api::ToolsSetup {
+        managed: Some(tools_dir.unwrap_or_else(|| app_data.join("tools"))),
+        roots,
+    };
+    let state = segno_api::local_state(&library_dir, tools).await?;
 
     let listener =
         tokio::net::TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0))).await?;

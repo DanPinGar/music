@@ -988,7 +988,96 @@ async function smoke() {
     check("hovering the timeline shows the comment there", said.includes("Pedal aquí"), said);
     await COMMANDS.ss("smoke-6-comments");
     await app.mouse.move(0, 0);
+
+    // The library: how far the clip was studied, renaming and tagging it, searching,
+    // the download dialog refusing other links, and deleting it with its files.
+    await app.keyboard.press("Control+1");
+    const card = "[data-testid=video-card]";
+    const listed = await appears(card);
+    const progressShown = await appears(`${card} [data-testid=study-progress]`, 2_000);
+    check(
+      "the library lists the clip with how far it was studied",
+      listed && progressShown,
+      squash(
+        await app
+          .locator(card)
+          .innerText()
+          .catch(() => ""),
+      ),
+    );
+
+    await app.click(`${card} [data-testid=video-menu]`).catch(() => {});
+    await app.click("[data-testid=video-edit]", { timeout: 3_000 }).catch(() => {});
+    await app.waitForSelector("[data-testid=edit-title]:focus", { timeout: 3_000 }).catch(() => {});
+    await app.keyboard.press("Control+a");
+    await app.keyboard.type("Smoke clip", { delay: 10 });
+    await app.keyboard.press("Tab");
+    await app.keyboard.type("Smoke, jazz, Smoke", { delay: 10 });
+    await app.keyboard.press("Enter");
+    await app.waitForSelector(`${card} >> text=Smoke clip`, { timeout: 5_000 }).catch(() => {});
+    const edited = await fetchVideo(imported.id);
+    check(
+      "the card's menu renames and tags the video",
+      edited?.title === "Smoke clip" && edited?.tags.join(",") === "Smoke,jazz",
+      `${edited?.title} [${edited?.tags.join(", ")}]`,
+    );
+
+    await app.waitForSelector("[data-slot=dialog-content]", { state: "detached" }).catch(() => {});
+    await app.keyboard.press("/");
+    const searching = await appears("[data-testid=library-search]:focus", 2_000);
+    await app.keyboard.type("zzz", { delay: 10 });
+    await sleep(200);
+    const hidden = await app.locator(card).count();
+    await app.keyboard.press("Escape");
+    await app.keyboard.type("JAZZ smo", { delay: 10 });
+    await sleep(200);
+    const found = await app.locator(card).count();
+    await app.keyboard.press("Escape");
+    await app.keyboard.press("Escape");
+    check(
+      '"/" searches the library by title and tags',
+      searching && hidden === 0 && found === 1,
+      `"zzz": ${hidden} cards, "JAZZ smo": ${found}`,
+    );
+
+    await app.keyboard.press("Control+d");
+    const dialog = await appears("[data-testid=download-url]:focus", 3_000);
+    await app.keyboard.type("https://vimeo.com/123", { delay: 5 });
+    const refused = await app.locator("[data-testid=download-start]").isDisabled();
+    await app.keyboard.press("Escape");
+    await app.waitForSelector("[data-slot=dialog-content]", { state: "detached" }).catch(() => {});
+    check("Ctrl+D asks for a YouTube link and refuses others", dialog && refused);
+
+    await app.click(`${card} [data-testid=video-menu]`).catch(() => {});
+    await app.click("[data-testid=video-delete]", { timeout: 3_000 }).catch(() => {});
+    await app.click("[data-testid=delete-confirm]", { timeout: 3_000 }).catch(() => {});
+    await app.waitForSelector(card, { state: "detached", timeout: 5_000 }).catch(() => {});
+    const system = await apiJson("/system");
+    const folder = path.join(system.library_path, "media", imported.id);
+    const left = await apiJson("/videos");
+    check(
+      "deleting the video removes it and its files",
+      left?.length === 0 && !fs.existsSync(folder),
+      `${left?.length} videos, folder ${fs.existsSync(folder) ? "still there" : "gone"}`,
+    );
+    await COMMANDS.ss("smoke-7-library");
   }
+
+  // The external tools: the palette opens their dialog; while developing they come from the
+  // repository's .tools, which the core leaves alone (it installs nothing).
+  const tools = await apiJson("/tools");
+  const states = (tools?.tools ?? []).map((tool) => `${tool.name}: ${tool.state}`);
+  await app.keyboard.press("Control+k");
+  await app.waitForSelector("[data-slot=command-input]", { timeout: 3_000 }).catch(() => {});
+  await app.click('[data-value="tools.show"]', { timeout: 3_000 }).catch(() => {});
+  const listed = await appears("[data-testid=tool-deno]", 3_000);
+  await app.keyboard.press("Escape");
+  await app.waitForSelector("[data-slot=dialog-content]", { state: "detached" }).catch(() => {});
+  check(
+    "the tools dialog lists ffmpeg, yt-dlp and Deno, left alone while developing",
+    listed && tools?.managed === true && tools.tools.every((tool) => tool.state === "external"),
+    states.join(", "),
+  );
   check(
     "no console errors, warnings or failed requests",
     problems.length === 0,

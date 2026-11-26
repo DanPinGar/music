@@ -37,5 +37,10 @@ pub async fn health() -> Json<Health> {
     )
 )]
 pub async fn get_system(State(state): State<AppState>) -> Json<SystemInfo> {
-    Json(state.system.as_ref().clone())
+    let versions = state.services.get().versions;
+    Json(SystemInfo {
+        ffmpeg_version: versions.ffmpeg,
+        ytdlp_version: versions.ytdlp,
+        ..state.system.as_ref().clone()
+    })
 }

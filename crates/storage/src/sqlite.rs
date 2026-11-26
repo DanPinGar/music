@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::Path;
 use std::str::FromStr;
 use std::time::Duration;
@@ -6,7 +7,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use segno_domain::{
     Comment, CommentId, CommentRepository, DomainError, Marker, MarkerId, MarkerRepository, Result,
-    Video, VideoId, VideoRepository, VideoState, VideoStateRepository,
+    Studied, Video, VideoId, VideoRepository, VideoState, VideoStateRepository,
 };
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::{FromRow, SqlitePool};
@@ -72,7 +73,7 @@ impl SqliteStore {
 
 macro_rules! video_columns {
     () => {
-        "id, source, source_url, title, channel, duration_ms, fps, width, height, status, media_file, proxy_file, thumbnails_file, peaks_file, attacks_file, preparation_error, created_at, updated_at"
+        "id, source, source_url, title, channel, duration_ms, fps, width, height, status, media_file, proxy_file, thumbnails_file, peaks_file, attacks_file, preparation_error, import_error, created_at, updated_at"
     };
 }
 
@@ -96,6 +97,7 @@ fn bind_fields<'q>(query: SqliteQuery<'q>, video: &'q Video) -> SqliteQuery<'q> 
         .bind(&video.peaks_file)
         .bind(&video.attacks_file)
         .bind(&video.preparation_error)
+        .bind(&video.import_error)
         .bind(video.created_at)
         .bind(video.updated_at)
 }
@@ -118,33 +120,34 @@ struct VideoRow {
     peaks_file: Option<String>,
     attacks_file: Option<String>,
     preparation_error: Option<String>,
+    import_error: Option<String>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }
 
-impl TryFrom<VideoRow> for Video {
-    type Error = DomainError;
-
-    fn try_from(row: VideoRow) -> Result<Self> {
-        Ok(Self {
-            id: row.id.parse()?,
-            source: row.source.parse()?,
-            source_url: row.source_url,
-            title: row.title,
-            channel: row.channel,
-            duration_ms: row.duration_ms,
-            fps: row.fps,
-            width: dimension(row.width)?,
-            height: dimension(row.height)?,
-            status: row.status.parse()?,
-            media_file: row.media_file,
-            proxy_file: row.proxy_file,
-            thumbnails_file: row.thumbnails_file,
-            peaks_file: row.peaks_file,
-            attacks_file: row.attacks_file,
-            preparation_error: row.preparation_error,
-            created_at: row.created_at,
-            updated_at: row.updated_at,
+impl VideoRow {
+    fn into_video(self, tags: Vec<String>) -> Result<Video> {
+        Ok(Video {
+            id: self.id.parse()?,
+            source: self.source.parse()?,
+            source_url: self.source_url,
+            title: self.title,
+            channel: self.channel,
+            duration_ms: self.duration_ms,
+            fps: self.fps,
+            width: dimension(self.width)?,
+            height: dimension(self.height)?,
+            status: self.status.parse()?,
+            media_file: self.media_file,
+            proxy_file: self.proxy_file,
+            thumbnails_file: self.thumbnails_file,
+            peaks_file: self.peaks_file,
+            attacks_file: self.attacks_file,
+            preparation_error: self.preparation_error,
+            import_error: self.import_error,
+            tags,
+            created_at: self.created_at,
+            updated_at: self.updated_at,
         })
     }
 }
@@ -153,6 +156,62 @@ fn dimension(value: Option<i64>) -> Result<Option<u32>> {
     value
         .map(|v| u32::try_from(v).map_err(DomainError::storage))
         .transpose()
+}
+
+fn video_not_found(id: VideoId) -> DomainError {
+    DomainError::NotFound {
+        entity: "video",
+        id: id.to_string(),
+    }
+}
+
+impl SqliteStore {
+    /// Tags of every video (or of one), each video's in their order.
+    async fn tags(&self, video: Option<VideoId>) -> Result<HashMap<String, Vec<String>>> {
+        let rows: Vec<(String, String)> = match video {
+            Some(id) => {
+                sqlx::query_as(
+                    "SELECT video_id, tag FROM video_tags WHERE video_id = ? ORDER BY position",
+                )
+                .bind(id.to_string())
+                .fetch_all(&self.pool)
+                .await
+            }
+            None => {
+                sqlx::query_as("SELECT video_id, tag FROM video_tags ORDER BY video_id, position")
+                    .fetch_all(&self.pool)
+                    .await
+            }
+        }
+        .map_err(DomainError::storage)?;
+        let mut tags: HashMap<String, Vec<String>> = HashMap::new();
+        for (video, tag) in rows {
+            tags.entry(video).or_default().push(tag);
+        }
+        Ok(tags)
+    }
+}
+
+/// Replaces a video's tags inside `transaction`.
+async fn replace_tags(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    video: &Video,
+) -> Result<()> {
+    sqlx::query("DELETE FROM video_tags WHERE video_id = ?")
+        .bind(video.id.to_string())
+        .execute(&mut **transaction)
+        .await
+        .map_err(DomainError::storage)?;
+    for (position, tag) in video.tags.iter().enumerate() {
+        sqlx::query("INSERT INTO video_tags (video_id, tag, position) VALUES (?, ?, ?)")
+            .bind(video.id.to_string())
+            .bind(tag)
+            .bind(position as i64)
+            .execute(&mut **transaction)
+            .await
+            .map_err(DomainError::storage)?;
+    }
+    Ok(())
 }
 
 #[async_trait]
@@ -166,7 +225,13 @@ impl VideoRepository for SqliteStore {
         .fetch_all(&self.pool)
         .await
         .map_err(DomainError::storage)?;
-        rows.into_iter().map(Video::try_from).collect()
+        let mut tags = self.tags(None).await?;
+        rows.into_iter()
+            .map(|row| {
+                let video_tags = tags.remove(&row.id).unwrap_or_default();
+                row.into_video(video_tags)
+            })
+            .collect()
     }
 
     async fn get(&self, id: VideoId) -> Result<Video> {
@@ -179,45 +244,65 @@ impl VideoRepository for SqliteStore {
         .fetch_optional(&self.pool)
         .await
         .map_err(DomainError::storage)?;
-        row.ok_or_else(|| DomainError::NotFound {
-            entity: "video",
-            id: id.to_string(),
-        })?
-        .try_into()
+        let row = row.ok_or_else(|| video_not_found(id))?;
+        let tags = self
+            .tags(Some(id))
+            .await?
+            .remove(&row.id)
+            .unwrap_or_default();
+        row.into_video(tags)
     }
 
     async fn insert(&self, video: &Video) -> Result<()> {
+        let mut transaction = self.pool.begin().await.map_err(DomainError::storage)?;
         let query = sqlx::query(concat!(
             "INSERT INTO videos (",
             video_columns!(),
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         ))
         .bind(video.id.to_string());
         bind_fields(query, video)
-            .execute(&self.pool)
+            .execute(&mut *transaction)
             .await
             .map_err(DomainError::storage)?;
-        Ok(())
+        replace_tags(&mut transaction, video).await?;
+        transaction.commit().await.map_err(DomainError::storage)
     }
 
     async fn update(&self, video: &Video) -> Result<()> {
+        let mut transaction = self.pool.begin().await.map_err(DomainError::storage)?;
         let query = sqlx::query(
             "UPDATE videos SET source = ?, source_url = ?, title = ?, channel = ?, \
              duration_ms = ?, fps = ?, width = ?, height = ?, status = ?, media_file = ?, \
              proxy_file = ?, thumbnails_file = ?, peaks_file = ?, attacks_file = ?, \
-             preparation_error = ?, created_at = ?, updated_at = ? \
+             preparation_error = ?, import_error = ?, created_at = ?, updated_at = ? \
              WHERE id = ? AND deleted_at IS NULL",
         );
         let result = bind_fields(query, video)
             .bind(video.id.to_string())
-            .execute(&self.pool)
+            .execute(&mut *transaction)
             .await
             .map_err(DomainError::storage)?;
         if result.rows_affected() == 0 {
-            return Err(DomainError::NotFound {
-                entity: "video",
-                id: video.id.to_string(),
-            });
+            return Err(video_not_found(video.id));
+        }
+        replace_tags(&mut transaction, video).await?;
+        transaction.commit().await.map_err(DomainError::storage)
+    }
+
+    async fn delete(&self, id: VideoId) -> Result<()> {
+        let now = Utc::now();
+        let result = sqlx::query(
+            "UPDATE videos SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL",
+        )
+        .bind(now)
+        .bind(now)
+        .bind(id.to_string())
+        .execute(&self.pool)
+        .await
+        .map_err(DomainError::storage)?;
+        if result.rows_affected() == 0 {
+            return Err(video_not_found(id));
         }
         Ok(())
     }
@@ -234,6 +319,24 @@ impl VideoStateRepository for SqliteStore {
                 .map_err(DomainError::storage)?;
         json.map(|json| serde_json::from_str(&json).map_err(DomainError::storage))
             .transpose()
+    }
+
+    async fn studied(&self) -> Result<Vec<Studied>> {
+        let rows: Vec<(String, Option<i64>, DateTime<Utc>)> = sqlx::query_as(
+            "SELECT video_id, json_extract(state, '$.position_ms'), updated_at FROM video_states",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(DomainError::storage)?;
+        rows.into_iter()
+            .map(|(video, position_ms, at)| {
+                Ok(Studied {
+                    video: video.parse()?,
+                    position_ms: position_ms.unwrap_or(0),
+                    at,
+                })
+            })
+            .collect()
     }
 
     async fn save_state(&self, video: VideoId, state: &VideoState) -> Result<()> {
@@ -620,6 +723,58 @@ mod tests {
 
         let other = SqliteStore::in_memory().await.unwrap();
         assert_ne!(other.library_id().await.unwrap(), id);
+    }
+
+    #[tokio::test]
+    async fn tags_and_import_errors_are_saved_with_the_video() {
+        let store = SqliteStore::in_memory().await.unwrap();
+        let mut video = sample("Tagged");
+        video.tags = vec!["Jazz".into(), "To learn".into()];
+        store.insert(&video).await.unwrap();
+        assert_eq!(
+            store.get(video.id).await.unwrap().tags,
+            ["Jazz", "To learn"]
+        );
+
+        video.tags = vec!["Ballad".into()];
+        video.import_error = Some("Video unavailable".into());
+        store.update(&video).await.unwrap();
+        let loaded = store.list().await.unwrap();
+        assert_eq!(loaded, vec![video]);
+    }
+
+    #[tokio::test]
+    async fn deleted_videos_leave_the_library() {
+        let store = SqliteStore::in_memory().await.unwrap();
+        let (kept, gone) = (sample("Kept"), sample("Gone"));
+        store.insert(&kept).await.unwrap();
+        store.insert(&gone).await.unwrap();
+        store.delete(gone.id).await.unwrap();
+        assert_eq!(store.list().await.unwrap(), vec![kept]);
+        assert!(store.get(gone.id).await.is_err());
+        assert!(matches!(
+            store.delete(gone.id).await,
+            Err(DomainError::NotFound { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn studied_videos_tell_where_they_were_left() {
+        let store = SqliteStore::in_memory().await.unwrap();
+        let video = sample("Studied");
+        store.insert(&video).await.unwrap();
+        assert!(store.studied().await.unwrap().is_empty());
+        let state = VideoState {
+            position_ms: 61_500,
+            ..VideoState::default()
+        };
+        store.save_state(video.id, &state).await.unwrap();
+        let studied = store.studied().await.unwrap();
+        assert_eq!(studied.len(), 1);
+        assert_eq!(
+            (studied[0].video, studied[0].position_ms),
+            (video.id, 61_500)
+        );
     }
 
     #[tokio::test]

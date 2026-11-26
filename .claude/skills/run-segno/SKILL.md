@@ -31,7 +31,7 @@ Rust; rustup installs that version on first use. Restart VS Code and terminals a
 ```bash
 pnpm install                              # JS dependencies, playwright-core for the driver, git hooks
 uv sync --directory engine --all-groups   # engine/.venv with dev tools, yt-dlp and Deno
-pnpm tools                                # ffmpeg into .tools/ffmpeg: needed to import videos
+pnpm tools                                # ffmpeg, yt-dlp and Deno into .tools/ (`pnpm tools --update` updates them)
 ```
 
 ## Run (agent path)
@@ -43,7 +43,7 @@ node .claude/skills/run-segno/driver.mjs --smoke        # dev mode: Vite + cargo
 node .claude/skills/run-segno/driver.mjs --smoke prod   # built app: real CSP and origin, ~25 s
 ```
 
-It prints `PASS`/`FAIL` for 38 checks:
+It prints `PASS`/`FAIL` for 44 checks:
 
 - the status bar fed by the API, the `Ctrl+K` palette running a command, the `?` dialog,
   `Ctrl+2`/`Ctrl+1` and the language toggle;
@@ -68,7 +68,34 @@ It prints `PASS`/`FAIL` for 38 checks:
   free), a double-click adds a marker, and return-on-pause goes back to where playback started;
 - comments: `C` writes one in Markdown at the playhead, `Ctrl+Enter` saves it and gives the keys
   back, a time written in it jumps there, and the hover preview shows it;
+- the library, back from the player: the card shows how far the clip was studied, its `···`
+  menu renames and tags it, `/` searches by title and tags, `Ctrl+D` opens the download dialog
+  and refuses a link that is not YouTube's, and deleting the clip removes it and its files;
+- the tools dialog, opened from the palette, lists ffmpeg, yt-dlp and Deno, and the core
+  reports them as external (it leaves the repository's `.tools` alone and installs nothing);
 - no console errors or HTTP errors.
+
+The smoke never downloads from YouTube or GitHub, so it passes offline.
+
+### Try the tools installer
+
+The installed app downloads ffmpeg, yt-dlp and Deno into its data folder on first start and
+keeps them up to date. In development it uses `.tools/` instead; `SEGNO_TOOLS_DIR` points it at
+another folder, which it fills itself (about 145 MB, some 15 s):
+
+```bash
+rm -rf target/run-segno/tools-app
+printf 'launch\nsleep 1500\ntext footer\nclick [data-testid=tools-status]\nwait [data-testid=tools]\nss tools\npress Escape\nsleep 30000\nget /tools\nimport test-clip\nquit\n' | SEGNO_TOOLS_DIR="$(pwd)/target/run-segno/tools-app" node .claude/skills/run-segno/driver.mjs
+```
+
+The footer shows `Instalando herramientas: ffmpeg 31 % · yt-dlp ✓ · Deno 58 %` (in the UI
+language), then nothing once all are ready; `GET /tools` gives each tool's state and version,
+and the import works without a restart. The tools dialog's items are
+`[data-testid=tool-ffmpeg]`, `[data-testid=tool-yt-dlp]` and `[data-testid=tool-deno]`; its
+"check for updates" button is `[data-testid=tools-check]`.
+
+`cargo run -p segno-tools -- --dir <folder> [--update] [ffmpeg] [yt-dlp] [deno]` (what
+`pnpm tools` runs) installs into any folder from the command line.
 
 The timeline's detail canvas exposes its state for tests: `data-start`, `data-span`,
 `data-follow`, `data-waveform` (`ready` or `none`), `data-attacks` (how many), `data-grid` (the
@@ -110,7 +137,20 @@ printf 'launch\napi\nimport test-clip\nwait video\nsleep 1500\npress Space\nslee
 ```
 
 Running `node .claude/skills/run-segno/driver.mjs` in a terminal gives a `segno>` prompt for
-the same commands. Palette items carry their command id in `data-value` (e.g.
+the same commands. To try a real YouTube download (it needs the network and `pnpm tools`),
+open the dialog, paste the link and follow the card; this one takes about 15 s plus 30 s of
+preparation:
+
+```bash
+printf 'launch\npress Control+d\nwait [data-testid=download-url]\ntype https://youtu.be/7A12z9S4F8U\nclick [data-testid=download-start]\nsleep 5000\ntext [data-testid=video-card]\nsleep 15000\ntext [data-testid=video-card]\nss downloaded\nquit\n' | node .claude/skills/run-segno/driver.mjs
+```
+
+Library cards are `[data-testid=video-card]` (with `data-video-id`); their menu is
+`[data-testid=video-menu]`, with `[data-testid=video-edit]` and `[data-testid=video-delete]`
+(confirmed by `[data-testid=delete-confirm]`). The search box is `[data-testid=library-search]`
+and the download dialog has `[data-testid=download-url]` and `[data-testid=download-start]`.
+
+Palette items carry their command id in `data-value` (e.g.
 `[data-value="nav.player"]`), which works whatever the UI language; text labels follow the
 language the app is set to.
 
@@ -173,8 +213,8 @@ pnpm dev   # builds and opens the window with hot reload; closing the window sto
 pnpm check
 ```
 
-Biome, both type checks, Vitest (108 tests), the UI build, rustfmt, clippy with warnings as
-errors, cargo test (89 tests, including real ffmpeg runs), Ruff, Pyright in strict mode and
+Biome, both type checks, Vitest (116 tests), the UI build, rustfmt, clippy with warnings as
+errors, cargo test (125 tests, including real ffmpeg runs and the installer against a fake GitHub), Ruff, Pyright in strict mode and
 pytest (7 tests). All pass. Set `SEGNO_REQUIRE_FFMPEG=1` to make the ffmpeg tests fail, instead
 of skipping, when `.tools/ffmpeg` is missing (CI does).
 
@@ -252,9 +292,8 @@ of skipping, when `.tools/ffmpeg` is missing (CI does).
   app is running. Quit that driver, or run `node .claude/skills/run-segno/driver.mjs --cleanup`.
 - **`the app process exited (code 4294967295)`** in a driver's output: something else killed the
   app (for example a `--cleanup`). Run `launch` again.
-- **`pnpm tools` fails with `http.client.RemoteDisconnected: Remote end closed connection without
-  response`**: GitHub dropped the download. The script retries three times; run it again if it
-  still fails.
+- **`pnpm tools` says `download failed: … connection closed`**: GitHub dropped the download.
+  `segno-tools` retries three times; run it again if it still fails.
 - **`uv: command not found` or `cargo: command not found` in Git Bash**: see the PATH gotcha.
 - **`pnpm peers check` reports `unmet peer typescript` for `openapi-typescript`**: the client
   generator needs TypeScript 5, so `packages/api-client` pins `typescript@~5.9.3` while the UI

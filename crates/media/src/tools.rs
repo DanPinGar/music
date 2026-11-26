@@ -11,6 +11,13 @@ pub struct MediaTools {
     pub version: String,
 }
 
+/// `.tools` in this repository, where `pnpm tools` installs the tools for development: ffmpeg in
+/// `ffmpeg/bin`, yt-dlp in `yt-dlp` and Deno in `deno`, as the app keeps them in `tools/`.
+/// The path is fixed at compile time, so it only exists on development machines.
+pub fn dev_tools_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.tools")
+}
+
 /// `.tools/ffmpeg/bin` in this repository, where `pnpm tools` installs ffmpeg for development.
 /// The path is fixed at compile time, so it only exists on development machines.
 pub fn dev_tools_dir() -> PathBuf {
@@ -53,7 +60,7 @@ impl MediaTools {
     }
 }
 
-fn executable(name: &str) -> String {
+pub(crate) fn executable(name: &str) -> String {
     if cfg!(windows) {
         format!("{name}.exe")
     } else {

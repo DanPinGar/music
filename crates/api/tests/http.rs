@@ -9,7 +9,11 @@ use axum::Router;
 use axum::body::{Body, Bytes, to_bytes};
 use axum::http::header::{AUTHORIZATION, CONTENT_RANGE, CONTENT_TYPE, HOST, RANGE};
 use axum::http::{HeaderMap, Request, StatusCode};
-use segno_api::{AppState, Preparations, SecurityConfig, SystemInfo};
+use segno_api::{
+    AppState, DownloadServices, Downloads, Preparations, SecurityConfig, SharedServices,
+    SystemInfo, ToolServices, ToolVersions,
+};
+use segno_domain::download::{Chapter, RemoteVideo, VideoDownloader};
 use segno_domain::{
     CommentRepository, MarkerRepository, MediaInfo, MediaPreparer, MediaProbe, MediaStore,
     PreparationInput, ThumbnailSprite, Video, VideoRepository, VideoSource, VideoStateRepository,
@@ -88,13 +92,85 @@ impl MediaPreparer for FakePreparer {
     }
 }
 
+/// Answers like YouTube for a video with two chapters and "downloads" a few bytes. It can
+/// fail, or hold the download until `release` is notified.
+#[derive(Default)]
+struct FakeDownloader {
+    fail: bool,
+    hold: bool,
+    release: tokio::sync::Notify,
+}
+
+#[async_trait]
+impl VideoDownloader for FakeDownloader {
+    async fn fetch_info(&self, _: &str) -> segno_domain::Result<RemoteVideo> {
+        Ok(RemoteVideo {
+            title: "Monk - I'm Confessin'".into(),
+            channel: Some("itsRemco".into()),
+            duration_ms: Some(141_000),
+            chapters: vec![
+                Chapter {
+                    start_ms: 0,
+                    end_ms: 60_000,
+                    title: "Theme".into(),
+                },
+                Chapter {
+                    start_ms: 60_000,
+                    end_ms: 141_000,
+                    title: "Solo".into(),
+                },
+            ],
+        })
+    }
+    async fn download(
+        &self,
+        _: &str,
+        target: &Path,
+        progress: &(dyn Fn(f64) + Send + Sync),
+    ) -> segno_domain::Result<()> {
+        progress(0.5);
+        if self.hold {
+            self.release.notified().await;
+        }
+        if self.fail {
+            return Err(segno_domain::DomainError::Unavailable(
+                "Video unavailable".into(),
+            ));
+        }
+        std::fs::write(target, b"DOWNLOADED").unwrap();
+        Ok(())
+    }
+}
+
 async fn harness_with(probe: Option<Arc<dyn MediaProbe>>, prepare: bool) -> Harness {
+    harness_full(probe, prepare, None).await
+}
+
+async fn harness_full(
+    probe: Option<Arc<dyn MediaProbe>>,
+    prepare: bool,
+    downloader: Option<Arc<FakeDownloader>>,
+) -> Harness {
     let store = SqliteStore::in_memory().await.unwrap();
     let library = tempfile::tempdir().unwrap();
     let videos: Arc<dyn VideoRepository> = Arc::new(store.clone());
     let media_files: Arc<dyn MediaStore> = Arc::new(LibraryFiles::new(library.path()));
-    let preparations = prepare
+    let markers: Arc<dyn MarkerRepository> = Arc::new(store.clone());
+    let preparations = (prepare || downloader.is_some())
         .then(|| Preparations::start(videos.clone(), media_files.clone(), Arc::new(FakePreparer)));
+    let downloads = match (&downloader, &probe, &preparations) {
+        (Some(downloader), Some(probe), Some(preparations)) => {
+            Some(Downloads::start(DownloadServices {
+                videos: videos.clone(),
+                markers: markers.clone(),
+                probe: probe.clone(),
+                store: media_files.clone(),
+                downloader: downloader.clone() as Arc<dyn VideoDownloader>,
+                preparations: preparations.clone(),
+            }))
+        }
+        _ => None,
+    };
     let state = AppState {
         system: Arc::new(SystemInfo {
             version: "test".into(),
@@ -102,14 +178,20 @@ async fn harness_with(probe: Option<Arc<dyn MediaProbe>>, prepare: bool) -> Harn
             library_path: None,
             schema_version: store.schema_version().await.unwrap(),
             ffmpeg_version: None,
+            ytdlp_version: None,
         }),
         videos,
         states: Arc::new(store.clone()) as Arc<dyn VideoStateRepository>,
-        markers: Arc::new(store.clone()) as Arc<dyn MarkerRepository>,
+        markers,
         comments: Arc::new(store.clone()) as Arc<dyn CommentRepository>,
         media_files,
-        probe,
-        preparations,
+        services: Arc::new(SharedServices::new(ToolServices {
+            probe,
+            preparations,
+            downloads,
+            versions: ToolVersions::default(),
+        })),
+        tools: None,
     };
     let app = segno_api::router(
         state,
@@ -194,6 +276,33 @@ async fn the_bearer_token_opens_protected_routes() {
     assert_eq!(body["version"], "test");
     assert_eq!(body["library_id"].as_str().unwrap().len(), 32);
     assert!(body["schema_version"].as_i64().unwrap() > 0);
+}
+
+#[tokio::test]
+async fn tools_report_what_is_in_use_and_a_core_without_a_tools_folder_does_not_update_them() {
+    let h = harness().await;
+    let (status, _, body) = send(&h.app, empty(authorized(get("/tools")))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["managed"], false);
+    let names: Vec<&str> = body["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["ffmpeg", "yt-dlp", "deno"]);
+    assert!(
+        body["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|tool| tool["state"] == "missing")
+    );
+
+    let check = authorized(Request::post("/tools/check").header(HOST, format!("127.0.0.1:{PORT}")));
+    let (status, _, body) = send(&h.app, empty(check)).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(body["status"], 503);
 }
 
 #[tokio::test]
@@ -583,6 +692,194 @@ async fn comments_are_written_rewritten_and_deleted() {
     assert_eq!(listed.as_array().unwrap().len(), 1);
 }
 
+/// Polls a video until `done` holds (the background workers are asynchronous).
+async fn wait_for(app: &Router, id: &str, done: impl Fn(&Value) -> bool) -> Value {
+    let mut current = Value::Null;
+    for _ in 0..200 {
+        let (_, _, video) = send(app, empty(authorized(get(&format!("/videos/{id}"))))).await;
+        current = video;
+        if done(&current) {
+            return current;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    panic!("never happened: {current}");
+}
+
+fn download_request(url: &str) -> Request<Body> {
+    json_request("POST", "/videos/download", json!({ "url": url }))
+}
+
+const MONK: &str = "https://www.youtube.com/watch?v=7A12z9S4F8U&list=RD7A12z9S4F8U";
+
+#[tokio::test]
+async fn youtube_videos_download_with_their_chapters_then_get_prepared() {
+    let downloader = Arc::new(FakeDownloader::default());
+    let h = harness_full(Some(Arc::new(FakeProbe)), true, Some(downloader)).await;
+
+    let (status, _, video) = send(&h.app, download_request(MONK)).await;
+    assert_eq!(status, StatusCode::CREATED, "{video}");
+    assert_eq!(video["source"], "youtube");
+    assert_eq!(
+        video["source_url"],
+        "https://www.youtube.com/watch?v=7A12z9S4F8U"
+    );
+    let id = video["id"].as_str().unwrap().to_owned();
+
+    let ready = wait_for(&h.app, &id, |v| {
+        v["status"] == "ready" && v["download"].is_null()
+    })
+    .await;
+    assert_eq!(ready["title"], "Monk - I'm Confessin'");
+    assert_eq!(ready["channel"], "itsRemco");
+    let prepared = wait_for(&h.app, &id, |v| v["seek_proxy"] == true).await;
+    assert!(prepared["import_error"].is_null());
+
+    let (_, _, markers) = send(
+        &h.app,
+        empty(authorized(get(&format!("/videos/{id}/markers")))),
+    )
+    .await;
+    let labels: Vec<&str> = markers
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["label"].as_str().unwrap())
+        .collect();
+    assert_eq!(labels, ["Theme", "Solo"]);
+
+    // The same video again (another kind of link) is the one already there.
+    let (status, _, again) = send(&h.app, download_request("https://youtu.be/7A12z9S4F8U")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(again["id"], id.as_str());
+}
+
+#[tokio::test]
+async fn failed_downloads_say_why_and_can_be_retried() {
+    let downloader = Arc::new(FakeDownloader {
+        fail: true,
+        ..FakeDownloader::default()
+    });
+    let h = harness_full(Some(Arc::new(FakeProbe)), true, Some(downloader)).await;
+    let (_, _, video) = send(&h.app, download_request(MONK)).await;
+    let id = video["id"].as_str().unwrap().to_owned();
+
+    let failed = wait_for(&h.app, &id, |v| v["status"] == "failed").await;
+    assert!(
+        failed["import_error"]
+            .as_str()
+            .unwrap()
+            .contains("Video unavailable")
+    );
+
+    let retry = json_request("POST", &format!("/videos/{id}/retry"), json!({}));
+    let (status, _, retried) = send(&h.app, retry).await;
+    assert_eq!(status, StatusCode::OK, "{retried}");
+    assert!(retried["import_error"].is_null());
+    wait_for(&h.app, &id, |v| v["status"] == "failed").await;
+}
+
+#[tokio::test]
+async fn deleting_a_downloading_video_stops_its_download() {
+    let downloader = Arc::new(FakeDownloader {
+        hold: true,
+        ..FakeDownloader::default()
+    });
+    let h = harness_full(Some(Arc::new(FakeProbe)), true, Some(downloader.clone())).await;
+    let (_, _, video) = send(&h.app, download_request(MONK)).await;
+    let id = video["id"].as_str().unwrap().to_owned();
+    let downloading = wait_for(&h.app, &id, |v| v["download"]["stage"] == "downloading").await;
+    assert!(downloading["download"]["progress"].as_f64().unwrap() > 0.05);
+
+    let delete = authorized(
+        Request::delete(format!("/videos/{id}")).header(HOST, format!("127.0.0.1:{PORT}")),
+    );
+    let (status, _, _) = raw(&h.app, empty(delete)).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    downloader.release.notify_waiters();
+    let (status, _, _) = send(&h.app, empty(authorized(get(&format!("/videos/{id}"))))).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (_, _, videos) = send(&h.app, empty(authorized(get("/videos")))).await;
+    assert_eq!(videos.as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn bad_youtube_addresses_and_missing_ytdlp_are_problems() {
+    let h = harness_full(
+        Some(Arc::new(FakeProbe)),
+        true,
+        Some(Arc::new(FakeDownloader::default())),
+    )
+    .await;
+    let (status, _, problem) = send(&h.app, download_request("https://vimeo.com/123")).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
+
+    let without = harness().await;
+    let (status, _, problem) = send(&without.app, download_request(MONK)).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(problem["detail"].as_str().unwrap().contains("yt-dlp"));
+}
+
+#[tokio::test]
+async fn videos_are_renamed_tagged_and_show_how_far_they_were_studied() {
+    let h = harness().await;
+    let video = stored_video(&h).await;
+    let uri = format!("/videos/{}", video.id);
+
+    let (status, _, edited) = send(
+        &h.app,
+        json_request(
+            "PATCH",
+            &uri,
+            json!({ "title": " Monk ballad ", "tags": ["Jazz", " jazz ", "To learn"] }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{edited}");
+    assert_eq!(edited["title"], "Monk ballad");
+    assert_eq!(edited["tags"], json!(["Jazz", "To learn"]));
+    assert!(edited["position_ms"].is_null());
+
+    let state = json!({
+        "position_ms": 61_500, "speed": 1.0, "step_unit": "seconds",
+        "practice": { "pre_roll_beats": 0, "count_in": false }
+    });
+    send(&h.app, json_request("PUT", &format!("{uri}/state"), state)).await;
+    let (_, _, listed) = send(&h.app, empty(authorized(get("/videos")))).await;
+    assert_eq!(listed[0]["position_ms"], 61_500);
+    assert!(listed[0]["studied_at"].is_string());
+    assert_eq!(listed[0]["tags"], json!(["Jazz", "To learn"]));
+
+    let (status, _, _) = send(
+        &h.app,
+        json_request("PATCH", &uri, json!({ "title": "  " })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn deleted_videos_take_their_media_with_them() {
+    let h = harness().await;
+    let file = h.library.path().join("clip.mp4");
+    std::fs::write(&file, b"ORIGINAL").unwrap();
+    let (_, _, video) = send(&h.app, import(&file)).await;
+    let id = video["id"].as_str().unwrap();
+    assert!(h.library.path().join("media").join(id).exists());
+
+    let delete = authorized(
+        Request::delete(format!("/videos/{id}")).header(HOST, format!("127.0.0.1:{PORT}")),
+    );
+    let (status, _, _) = raw(&h.app, empty(delete)).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert!(!h.library.path().join("media").join(id).exists());
+    let delete_again = authorized(
+        Request::delete(format!("/videos/{id}")).header(HOST, format!("127.0.0.1:{PORT}")),
+    );
+    let (status, _, _) = raw(&h.app, empty(delete_again)).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
 #[test]
 fn the_openapi_document_describes_every_route() {
     let doc = serde_json::to_value(segno_api::openapi()).unwrap();
@@ -602,6 +899,10 @@ fn the_openapi_document_describes_every_route() {
         "/videos/{id}/markers/{marker_id}",
         "/videos/{id}/comments",
         "/videos/{id}/comments/{comment_id}",
+        "/videos/download",
+        "/videos/{id}/retry",
+        "/tools",
+        "/tools/check",
     ] {
         assert!(paths.contains_key(path), "missing {path}");
     }

@@ -6,8 +6,8 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
-use segno_api::SecurityConfig;
-use segno_media::dev_tools_dir;
+use segno_api::{SecurityConfig, ToolsSetup};
+use segno_media::dev_tools_root;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
@@ -32,6 +32,10 @@ enum Command {
         /// Origin allowed by CORS (repeatable).
         #[arg(long = "allow-origin", default_value = "http://localhost:5173")]
         allowed_origins: Vec<String>,
+        /// Folder where the core installs and updates ffmpeg, yt-dlp and Deno by itself; when
+        /// omitted it uses the repository's `.tools` (filled by `pnpm tools`) and the PATH.
+        #[arg(long)]
+        tools: Option<PathBuf>,
     },
     /// Write the OpenAPI document as JSON.
     Openapi {
@@ -49,7 +53,8 @@ async fn main() -> anyhow::Result<()> {
             token,
             library,
             allowed_origins,
-        } => serve(port, token, library, allowed_origins).await,
+            tools,
+        } => serve(port, token, library, allowed_origins, tools).await,
         Command::Openapi { out } => export_openapi(out),
     }
 }
@@ -59,6 +64,7 @@ async fn serve(
     token: String,
     library: PathBuf,
     allowed_origins: Vec<String>,
+    tools: Option<PathBuf>,
 ) -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -66,7 +72,17 @@ async fn serve(
         )
         .init();
 
-    let state = segno_api::local_state(&library, &[dev_tools_dir()]).await?;
+    let tools = match tools {
+        Some(dir) => ToolsSetup {
+            managed: Some(dir),
+            roots: Vec::new(),
+        },
+        None => ToolsSetup {
+            managed: None,
+            roots: vec![dev_tools_root()],
+        },
+    };
+    let state = segno_api::local_state(&library, tools).await?;
     let origins: Vec<&str> = allowed_origins.iter().map(String::as_str).collect();
     let security = SecurityConfig::local(token, port, &origins);
 

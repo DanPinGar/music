@@ -38,6 +38,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The external tools (ffmpeg, yt-dlp, Deno): versions in use, installs and updates running. */
+        get: operations["list_tools"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tools/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Installs the missing tools and looks for newer releases now, in the background. */
+        post: operations["check_tools"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/videos": {
         parameters: {
             query?: never;
@@ -49,6 +83,27 @@ export interface paths {
         get: operations["list_videos"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/videos/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Downloads a YouTube video into the library in the background (its progress is in the
+         *     video's `download`), then prepares it for navigation. Its chapters become sections. A
+         *     video already in the library is returned as it is.
+         */
+        post: operations["download_video"];
         delete?: never;
         options?: never;
         head?: never;
@@ -86,10 +141,15 @@ export interface paths {
         get: operations["get_video"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Removes a video from the library with its media files, stopping its download if it is
+         *     still downloading.
+         */
+        delete: operations["delete_video"];
         options?: never;
         head?: never;
-        patch?: never;
+        /** Renames a video or replaces its tags. */
+        patch: operations["edit_video"];
         trace?: never;
     };
     "/videos/{id}/attacks": {
@@ -219,6 +279,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/videos/{id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Downloads a failed YouTube video again. */
+        post: operations["retry_video"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/videos/{id}/state": {
         parameters: {
             query?: never;
@@ -309,6 +386,25 @@ export interface components {
             /** Format: int64 */
             start_ms: number;
         };
+        /** @description Progress of downloading a video from YouTube. */
+        DownloadDto: {
+            /**
+             * Format: double
+             * @description The whole download, from 0 to 1.
+             */
+            progress: number;
+            stage: components["schemas"]["DownloadStageDto"];
+        };
+        /** @description A YouTube video to download. */
+        DownloadRequest: {
+            /** @description Its address: a watch, youtu.be, shorts or music link. */
+            url: string;
+        };
+        /**
+         * @description The step running, in order: waiting, reading the details, downloading, finishing.
+         * @enum {string}
+         */
+        DownloadStageDto: "queued" | "fetching" | "downloading" | "finishing";
         /** @description Result of the liveness probe. */
         Health: {
             /** @description Always `ok` while the API is serving. */
@@ -441,7 +537,7 @@ export interface components {
         StepUnitDto: "seconds" | "beat" | "bar";
         /** @description Facts about the running core, shown in the UI's status bar. */
         SystemInfo: {
-            /** @description Version of the ffmpeg in use; `None` when it was not found. */
+            /** @description Version of the ffmpeg in use; `None` while it is missing (no imports). */
             ffmpeg_version?: string | null;
             /** @description Identity of the library, stable for its whole life (unlike its folder). */
             library_id: string;
@@ -454,6 +550,8 @@ export interface components {
             schema_version: number;
             /** @description Version of the core. */
             version: string;
+            /** @description Version of the yt-dlp in use; `None` while it is missing (no YouTube downloads). */
+            ytdlp_version?: string | null;
         };
         /**
          * @description Layout of the thumbnail sprite: tile `n` shows the video at `n * interval_ms`, at column
@@ -479,11 +577,55 @@ export interface components {
             /** Format: int64 */
             start_ms: number;
         };
+        /** @description An external tool: its version in use, and what the core is doing with it. */
+        ToolDto: {
+            /**
+             * Format: date-time
+             * @description When the core last looked for a newer release.
+             */
+            checked_at?: string | null;
+            /** @description Why the last install or update failed. */
+            error?: string | null;
+            name: components["schemas"]["ToolNameDto"];
+            /** @description A newer version already downloaded, used from the next start. */
+            pending_version?: string | null;
+            /**
+             * Format: double
+             * @description Download progress while installing or updating, from 0 to 1.
+             */
+            progress?: number | null;
+            state: components["schemas"]["ToolStateDto"];
+            /** @description Version in use, as the tool reports it. */
+            version?: string | null;
+        };
+        /**
+         * @description An external tool the core runs.
+         * @enum {string}
+         */
+        ToolNameDto: "ffmpeg" | "yt-dlp" | "deno";
+        /**
+         * @description Where a tool stands.
+         * @enum {string}
+         */
+        ToolStateDto: "ready" | "missing" | "installing" | "updating" | "external" | "unsupported";
+        /** @description The external tools and what the core does with them. */
+        ToolsDto: {
+            /** @description Whether the core installs and updates its tools itself. */
+            managed: boolean;
+            tools: components["schemas"]["ToolDto"][];
+        };
+        /** @description Changes to a video: each field only when given. */
+        VideoChangesDto: {
+            /** @description Replaces all the video's tags. */
+            tags?: string[] | null;
+            title?: string | null;
+        };
         /** @description A video in the library. */
         VideoDto: {
             channel?: string | null;
             /** Format: date-time */
             created_at: string;
+            download?: null | components["schemas"]["DownloadDto"];
             /** Format: int64 */
             duration_ms?: number | null;
             /** Format: double */
@@ -496,6 +638,13 @@ export interface components {
             height?: number | null;
             /** Format: uuid */
             id: string;
+            /** @description Why the download or import failed (status `failed`), if it did. */
+            import_error?: string | null;
+            /**
+             * Format: int64
+             * @description Where the user left the video, if they have opened it.
+             */
+            position_ms?: number | null;
             preparation?: null | components["schemas"]["PreparationDto"];
             /** @description Why the preparation failed, if it did. */
             preparation_error?: string | null;
@@ -505,6 +654,12 @@ export interface components {
             /** @description Original address, for downloaded videos. */
             source_url?: string | null;
             status: components["schemas"]["VideoStatusDto"];
+            /**
+             * Format: date-time
+             * @description When the user last studied the video.
+             */
+            studied_at?: string | null;
+            tags: string[];
             thumbnails?: null | components["schemas"]["ThumbnailsDto"];
             title: string;
             /** Format: date-time */
@@ -595,6 +750,73 @@ export interface operations {
             };
         };
     };
+    list_tools: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The tools */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolsDto"];
+                };
+            };
+            /** @description Missing or invalid token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    check_tools: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Checking; follow it with GET /tools */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolsDto"];
+                };
+            };
+            /** @description Missing or invalid token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description This core does not manage its tools */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     list_videos: {
         parameters: {
             query?: never;
@@ -615,6 +837,66 @@ export interface operations {
             };
             /** @description Missing or invalid token */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    download_video: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DownloadRequest"];
+            };
+        };
+        responses: {
+            /** @description The video was already in the library */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoDto"];
+                };
+            };
+            /** @description The video, queued to download */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoDto"];
+                };
+            };
+            /** @description Not the address of a YouTube video */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Missing or invalid token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description yt-dlp or ffmpeg is not available */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -694,6 +976,99 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["VideoDto"];
+                };
+            };
+            /** @description Missing or invalid token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description No such video */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    delete_video: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Video id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description No such video */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    edit_video: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Video id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VideoChangesDto"];
+            };
+        };
+        responses: {
+            /** @description The video as saved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoDto"];
+                };
+            };
+            /** @description An empty title, or too many or too long tags */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
             /** @description Missing or invalid token */
@@ -1219,6 +1594,65 @@ export interface operations {
             };
             /** @description No such video, or no waveform yet */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    retry_video: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Video id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The video, queued to download again */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoDto"];
+                };
+            };
+            /** @description The video is not a failed download */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Missing or invalid token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description No such video */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description yt-dlp or ffmpeg is not available */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

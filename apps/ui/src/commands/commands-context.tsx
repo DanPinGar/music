@@ -60,11 +60,13 @@ export function useGlobalShortcuts(): void {
 
 const NON_TEXT_INPUTS = new Set(["button", "checkbox", "radio", "range", "reset", "submit"]);
 
-function dialogOpen(): boolean {
+/** Whether a dialog is open, or still opening or closing. */
+export function dialogOpen(): boolean {
   return document.querySelector("[data-slot=dialog-content]") !== null;
 }
 
-function isTypingTarget(target: EventTarget | null): boolean {
+/** Whether keys pressed in `target` are text being typed. */
+export function isTypingTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   if (target.isContentEditable) return true;
   if (target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return true;

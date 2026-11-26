@@ -3,9 +3,12 @@ use axum::body::Body;
 use axum::extract::{Path, Request, State};
 use axum::http::StatusCode;
 use axum::response::Response;
+use std::collections::HashMap;
+
 use chrono::{DateTime, Utc};
+use segno_domain::download::{self, DownloadStage};
 use segno_domain::library::{self, PreparationStage};
-use segno_domain::{ThumbnailSprite, Video, VideoId, VideoSource, VideoStatus};
+use segno_domain::{Studied, ThumbnailSprite, Video, VideoId, VideoSource, VideoStatus};
 use serde::{Deserialize, Serialize};
 use tower::ServiceExt;
 use tower_http::services::ServeFile;
@@ -13,7 +16,7 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::preparations::Progress;
-use crate::{ApiError, AppState, Problem};
+use crate::{ApiError, AppState, DownloadProgress, Problem};
 
 /// A video in the library.
 #[derive(Debug, Serialize, ToSchema)]
@@ -41,6 +44,15 @@ pub struct VideoDto {
     pub preparation: Option<PreparationDto>,
     /// Why the preparation failed, if it did.
     pub preparation_error: Option<String>,
+    /// Present while the video is being downloaded from YouTube.
+    pub download: Option<DownloadDto>,
+    /// Why the download or import failed (status `failed`), if it did.
+    pub import_error: Option<String>,
+    pub tags: Vec<String>,
+    /// Where the user left the video, if they have opened it.
+    pub position_ms: Option<i64>,
+    /// When the user last studied the video.
+    pub studied_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -114,8 +126,40 @@ pub struct AttacksDto {
     pub strengths: Vec<f32>,
 }
 
+/// Progress of downloading a video from YouTube.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct DownloadDto {
+    pub stage: DownloadStageDto,
+    /// The whole download, from 0 to 1.
+    pub progress: f64,
+}
+
+/// The step running, in order: waiting, reading the details, downloading, finishing.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DownloadStageDto {
+    Queued,
+    Fetching,
+    Downloading,
+    Finishing,
+}
+
+/// What a video has beyond its own row: how the background work goes, and how far the user
+/// got in it.
+#[derive(Default)]
+struct Extras {
+    preparation: Option<Progress>,
+    download: Option<DownloadProgress>,
+    studied: Option<Studied>,
+}
+
 impl VideoDto {
-    fn new(video: Video, progress: Option<Progress>) -> Self {
+    fn new(video: Video, extras: Extras) -> Self {
+        let Extras {
+            preparation: progress,
+            download,
+            studied,
+        } = extras;
         let thumbnails = match (
             &video.thumbnails_file,
             video.duration_ms,
@@ -168,6 +212,19 @@ impl VideoDto {
                 progress: progress.done,
             }),
             preparation_error: video.preparation_error,
+            download: download.map(|download| DownloadDto {
+                stage: match download.stage {
+                    None => DownloadStageDto::Queued,
+                    Some(DownloadStage::Fetching) => DownloadStageDto::Fetching,
+                    Some(DownloadStage::Downloading) => DownloadStageDto::Downloading,
+                    Some(DownloadStage::Finishing) => DownloadStageDto::Finishing,
+                },
+                progress: download.done,
+            }),
+            import_error: video.import_error,
+            tags: video.tags,
+            position_ms: studied.map(|studied| studied.position_ms),
+            studied_at: studied.map(|studied| studied.at),
             created_at: video.created_at,
             updated_at: video.updated_at,
         }
@@ -175,12 +232,33 @@ impl VideoDto {
 }
 
 impl AppState {
-    fn dto(&self, video: Video) -> VideoDto {
-        let progress = self
-            .preparations
-            .as_ref()
-            .and_then(|preparations| preparations.progress(video.id));
-        VideoDto::new(video, progress)
+    fn dto(&self, video: Video, studied: Option<Studied>) -> VideoDto {
+        let extras = Extras {
+            preparation: self
+                .preparations()
+                .and_then(|preparations| preparations.progress(video.id)),
+            download: self
+                .downloads()
+                .and_then(|downloads| downloads.progress(video.id)),
+            studied,
+        };
+        VideoDto::new(video, extras)
+    }
+
+    /// The video with how far the user got in it.
+    async fn video_dto(&self, video: Video) -> Result<VideoDto, ApiError> {
+        let studied = self.studied().await?.remove(&video.id);
+        Ok(self.dto(video, studied))
+    }
+
+    async fn studied(&self) -> Result<HashMap<VideoId, Studied>, ApiError> {
+        Ok(self
+            .states
+            .studied()
+            .await?
+            .into_iter()
+            .map(|studied| (studied.video, studied))
+            .collect())
     }
 }
 
@@ -197,8 +275,15 @@ impl AppState {
 )]
 pub async fn list_videos(State(state): State<AppState>) -> Result<Json<Vec<VideoDto>>, ApiError> {
     let videos = state.videos.list().await?;
+    let mut studied = state.studied().await?;
     Ok(Json(
-        videos.into_iter().map(|video| state.dto(video)).collect(),
+        videos
+            .into_iter()
+            .map(|video| {
+                let progress = studied.remove(&video.id);
+                state.dto(video, progress)
+            })
+            .collect(),
     ))
 }
 
@@ -220,7 +305,141 @@ pub async fn get_video(
     Path(id): Path<Uuid>,
 ) -> Result<Json<VideoDto>, ApiError> {
     let video = state.videos.get(VideoId::from_uuid(id)).await?;
-    Ok(Json(state.dto(video)))
+    Ok(Json(state.video_dto(video).await?))
+}
+
+/// Changes to a video: each field only when given.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct VideoChangesDto {
+    pub title: Option<String>,
+    /// Replaces all the video's tags.
+    pub tags: Option<Vec<String>>,
+}
+
+/// Renames a video or replaces its tags.
+#[utoipa::path(
+    patch,
+    path = "/videos/{id}",
+    tag = "videos",
+    security(("token" = [])),
+    params(("id" = Uuid, Path, description = "Video id")),
+    request_body = VideoChangesDto,
+    responses(
+        (status = 200, description = "The video as saved", body = VideoDto),
+        (status = 400, description = "An empty title, or too many or too long tags", body = Problem),
+        (status = 401, description = "Missing or invalid token", body = Problem),
+        (status = 404, description = "No such video", body = Problem)
+    )
+)]
+pub async fn edit_video(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(changes): Json<VideoChangesDto>,
+) -> Result<Json<VideoDto>, ApiError> {
+    let mut video = state.videos.get(VideoId::from_uuid(id)).await?;
+    video.edit(changes.title.as_deref(), changes.tags.as_deref())?;
+    state.videos.update(&video).await?;
+    Ok(Json(state.video_dto(video).await?))
+}
+
+/// Removes a video from the library with its media files, stopping its download if it is
+/// still downloading.
+#[utoipa::path(
+    delete,
+    path = "/videos/{id}",
+    tag = "videos",
+    security(("token" = [])),
+    params(("id" = Uuid, Path, description = "Video id")),
+    responses(
+        (status = 204, description = "Deleted"),
+        (status = 401, description = "Missing or invalid token", body = Problem),
+        (status = 404, description = "No such video", body = Problem)
+    )
+)]
+pub async fn delete_video(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode, ApiError> {
+    let id = VideoId::from_uuid(id);
+    if let Some(downloads) = state.downloads() {
+        downloads.cancel(id);
+    }
+    state.videos.delete(id).await?;
+    state.media_files.remove_all(id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+fn no_downloads() -> ApiError {
+    ApiError::Unavailable(
+        "yt-dlp is not installed yet, so videos cannot be downloaded: Segno installs it by itself"
+            .into(),
+    )
+}
+
+/// A YouTube video to download.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct DownloadRequest {
+    /// Its address: a watch, youtu.be, shorts or music link.
+    pub url: String,
+}
+
+/// Downloads a YouTube video into the library in the background (its progress is in the
+/// video's `download`), then prepares it for navigation. Its chapters become sections. A
+/// video already in the library is returned as it is.
+#[utoipa::path(
+    post,
+    path = "/videos/download",
+    tag = "videos",
+    security(("token" = [])),
+    request_body = DownloadRequest,
+    responses(
+        (status = 201, description = "The video, queued to download", body = VideoDto),
+        (status = 200, description = "The video was already in the library", body = VideoDto),
+        (status = 400, description = "Not the address of a YouTube video", body = Problem),
+        (status = 401, description = "Missing or invalid token", body = Problem),
+        (status = 503, description = "yt-dlp or ffmpeg is not available", body = Problem)
+    )
+)]
+pub async fn download_video(
+    State(state): State<AppState>,
+    Json(request): Json<DownloadRequest>,
+) -> Result<(StatusCode, Json<VideoDto>), ApiError> {
+    let downloads = state.downloads().ok_or_else(no_downloads)?;
+    let (video, created) = download::begin_download(state.videos.as_ref(), &request.url).await?;
+    if created {
+        downloads.enqueue(video.id);
+    }
+    let status = if created {
+        StatusCode::CREATED
+    } else {
+        StatusCode::OK
+    };
+    Ok((status, Json(state.video_dto(video).await?)))
+}
+
+/// Downloads a failed YouTube video again.
+#[utoipa::path(
+    post,
+    path = "/videos/{id}/retry",
+    tag = "videos",
+    security(("token" = [])),
+    params(("id" = Uuid, Path, description = "Video id")),
+    responses(
+        (status = 200, description = "The video, queued to download again", body = VideoDto),
+        (status = 400, description = "The video is not a failed download", body = Problem),
+        (status = 401, description = "Missing or invalid token", body = Problem),
+        (status = 404, description = "No such video", body = Problem),
+        (status = 503, description = "yt-dlp or ffmpeg is not available", body = Problem)
+    )
+)]
+pub async fn retry_video(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<VideoDto>, ApiError> {
+    let downloads = state.downloads().ok_or_else(no_downloads)?;
+    let video = download::retry_download(state.videos.as_ref(), VideoId::from_uuid(id)).await?;
+    downloads.enqueue(video.id);
+    Ok(Json(state.video_dto(video).await?))
 }
 
 /// A video file on this computer to add to the library.
@@ -251,21 +470,24 @@ pub async fn import_video(
     State(state): State<AppState>,
     Json(request): Json<ImportVideoRequest>,
 ) -> Result<(StatusCode, Json<VideoDto>), ApiError> {
-    let probe = state.probe.as_deref().ok_or_else(|| {
-        ApiError::Unavailable("ffmpeg was not found, so videos cannot be imported".into())
+    let probe = state.probe().ok_or_else(|| {
+        ApiError::Unavailable(
+            "ffmpeg is not installed yet, so videos cannot be imported: Segno installs it by itself"
+                .into(),
+        )
     })?;
     let video = library::import_local_video(
         state.videos.as_ref(),
-        probe,
+        probe.as_ref(),
         state.media_files.as_ref(),
         std::path::Path::new(&request.path),
         request.title.as_deref(),
     )
     .await?;
-    if let Some(preparations) = &state.preparations {
+    if let Some(preparations) = state.preparations() {
         preparations.enqueue(video.id);
     }
-    Ok((StatusCode::CREATED, Json(state.dto(video))))
+    Ok((StatusCode::CREATED, Json(state.dto(video, None))))
 }
 
 /// The video for the player: the copy made for instant seeking once it exists, the original

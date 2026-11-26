@@ -17,6 +17,9 @@ export type NewMarker = components["schemas"]["NewMarkerDto"];
 export type MarkerChanges = components["schemas"]["MarkerChangesDto"];
 export type Comment = components["schemas"]["CommentDto"];
 export type CommentFields = components["schemas"]["CommentFieldsDto"];
+export type Tool = components["schemas"]["ToolDto"];
+export type ToolName = components["schemas"]["ToolNameDto"];
+export type Tools = components["schemas"]["ToolsDto"];
 
 /** Files of a video that elements load by URL: `<video src>`, CSS backgrounds… */
 export type VideoAsset = "media" | "thumbnails" | "peaks";

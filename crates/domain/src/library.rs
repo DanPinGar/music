@@ -153,94 +153,13 @@ async fn save(video: &mut Video, videos: &dyn VideoRepository) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
     use std::sync::Mutex;
 
     use async_trait::async_trait;
 
     use super::*;
-    use crate::{MediaInfo, VideoId};
-
-    #[derive(Default)]
-    struct Videos {
-        saved: Mutex<Vec<Video>>,
-        fail: bool,
-    }
-
-    #[async_trait]
-    impl VideoRepository for Videos {
-        async fn list(&self) -> Result<Vec<Video>> {
-            Ok(self.saved.lock().unwrap().clone())
-        }
-        async fn get(&self, id: VideoId) -> Result<Video> {
-            self.saved
-                .lock()
-                .unwrap()
-                .iter()
-                .find(|v| v.id == id)
-                .cloned()
-                .ok_or(DomainError::NotFound {
-                    entity: "video",
-                    id: id.to_string(),
-                })
-        }
-        async fn insert(&self, video: &Video) -> Result<()> {
-            if self.fail {
-                return Err(DomainError::storage(std::io::Error::other("disk full")));
-            }
-            self.saved.lock().unwrap().push(video.clone());
-            Ok(())
-        }
-        async fn update(&self, video: &Video) -> Result<()> {
-            let mut saved = self.saved.lock().unwrap();
-            let slot = saved.iter_mut().find(|v| v.id == video.id).unwrap();
-            *slot = video.clone();
-            Ok(())
-        }
-    }
-
-    struct Probe(MediaInfo);
-
-    #[async_trait]
-    impl MediaProbe for Probe {
-        async fn probe(&self, _: &Path) -> Result<MediaInfo> {
-            Ok(self.0.clone())
-        }
-    }
-
-    #[derive(Default)]
-    struct Store {
-        removed: Mutex<Vec<VideoId>>,
-    }
-
-    #[async_trait]
-    impl MediaStore for Store {
-        async fn store_original(&self, video: VideoId, _: &Path) -> Result<String> {
-            Ok(format!("media/{video}/original.mp4"))
-        }
-        async fn derived(&self, video: VideoId, file_name: &str) -> Result<(String, PathBuf)> {
-            let relative = format!("media/{video}/{file_name}");
-            Ok((relative.clone(), PathBuf::from(relative)))
-        }
-        fn resolve(&self, relative: &str) -> Result<PathBuf> {
-            Ok(PathBuf::from(relative))
-        }
-        async fn remove_all(&self, video: VideoId) -> Result<()> {
-            self.removed.lock().unwrap().push(video);
-            Ok(())
-        }
-    }
-
-    fn video_info() -> MediaInfo {
-        MediaInfo {
-            duration_ms: 141_154,
-            fps: Some(60.0),
-            width: Some(1920),
-            height: Some(1080),
-            video_codec: Some("h264".into()),
-            audio_codec: Some("aac".into()),
-        }
-    }
+    use crate::MediaInfo;
+    use crate::fakes::{Probe, Store, Videos, video_info};
 
     fn existing_file() -> tempfile::NamedTempFile {
         tempfile::Builder::new()

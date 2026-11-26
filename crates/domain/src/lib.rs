@@ -5,7 +5,10 @@
 //! Tauri.
 
 mod comment;
+pub mod download;
 mod error;
+#[cfg(test)]
+mod fakes;
 pub mod library;
 mod marker;
 mod media;
@@ -19,7 +22,7 @@ pub use media::{
     MediaInfo, MediaPreparer, MediaProbe, MediaStore, PreparationInput, ThumbnailSprite,
 };
 pub use state::{
-    BeatGrid, LoopRange, MAX_SPEED, MIN_SPEED, Practice, SpeedTrainer, StepUnit, TimelineView,
-    VideoState, VideoStateRepository,
+    BeatGrid, LoopRange, MAX_SPEED, MIN_SPEED, Practice, SpeedTrainer, StepUnit, Studied,
+    TimelineView, VideoState, VideoStateRepository,
 };
-pub use video::{Video, VideoId, VideoRepository, VideoSource, VideoStatus};
+pub use video::{Video, VideoId, VideoRepository, VideoSource, VideoStatus, clean_tags};

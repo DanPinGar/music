@@ -24,7 +24,47 @@
       "importing": "Importing",
       "ready": "Ready",
       "failed": "Failed"
-    }
+    },
+    "download": "Download from YouTube",
+    "downloadTitle": "Download a YouTube video",
+    "downloadDescription": "Paste the link of the video. It is downloaded in the best quality up to 1080p, with its chapters as sections.",
+    "downloadUrl": "YouTube link",
+    "downloadInvalid": "That is not a link to a YouTube video.",
+    "downloadNotice": "Download only videos you have the right to keep, for your own study.",
+    "downloadStart": "Download",
+    "downloadQueued": "Download queued",
+    "downloadExists": "{{title}} is already in the library",
+    "downloadFailed": "Could not download the video",
+    "downloadError": "The download failed: hover for details",
+    "importError": "The import failed: hover for details",
+    "emptyDownload": "or paste a YouTube link here, or press",
+    "search": "Search titles, channels and tags…",
+    "sort": "Sort",
+    "orders": {
+      "added": "Recently added",
+      "studied": "Recently studied",
+      "title": "Title"
+    },
+    "allTags": "All",
+    "noMatches": "No video matches the search.",
+    "clearFilters": "Clear filters",
+    "count": "{{shown}} of {{total}} videos",
+    "resume": "Continue at {{time}}",
+    "actions": "More actions",
+    "edit": "Rename and tags…",
+    "editTitle": "Edit the video",
+    "editName": "Title",
+    "editTags": "Tags",
+    "editTagsHint": "Separated by commas, e.g. Jazz, To learn",
+    "editFailed": "Could not save the changes",
+    "save": "Save",
+    "delete": "Delete…",
+    "deleteTitle": "Delete “{{title}}”?",
+    "deleteBody": "The video and its files leave the library, and with them its markers and comments.",
+    "deleteConfirm": "Delete",
+    "deleted": "{{title}} deleted",
+    "deleteFailed": "Could not delete the video",
+    "downloadWaiting": "Segno is still installing the tools downloads need: you can download as soon as it finishes."
   },
   "player": {
     "title": "Player",
@@ -117,7 +157,10 @@
     "jumpToMarker": "Go to marker 1–9",
     "toggleMarkersPanel": "Show or hide the markers panel",
     "addComment": "Comment here",
-    "showComments": "Show the comments"
+    "showComments": "Show the comments",
+    "downloadVideo": "Download a YouTube video",
+    "searchLibrary": "Search the library",
+    "showTools": "Show the external tools"
   },
   "commandGroups": {
     "general": "General",
@@ -135,8 +178,7 @@
     "connecting": "Connecting to the core…",
     "connected": "Segno {{version}}",
     "disconnected": "No connection to the core",
-    "library": "Library: {{path}}",
-    "noFfmpeg": "ffmpeg not found: videos cannot be imported"
+    "library": "Library: {{path}}"
   },
   "language": {
     "other": "Español",
@@ -215,5 +257,41 @@
     "help": "Ctrl+Enter saves · Esc cancels",
     "cancel": "Cancel",
     "save": "Save"
+  },
+  "download": {
+    "queued": "Waiting to download…",
+    "fetching": "Reading the video details…",
+    "downloading": "Downloading… {{percent}} %",
+    "finishing": "Finishing the download…"
+  },
+  "tools": {
+    "title": "External tools",
+    "description": "Segno installs them and keeps them up to date by itself, checking every download against its published checksum.",
+    "notManaged": "This core uses the tools it finds and does not update them.",
+    "purpose": {
+      "ffmpeg": "Imports and prepares videos",
+      "yt-dlp": "Downloads from YouTube",
+      "deno": "yt-dlp needs it to read YouTube"
+    },
+    "state": {
+      "ready": "Installed",
+      "missing": "Not installed",
+      "installing": "Installing… {{percent}} %",
+      "updating": "Updating… {{percent}} %",
+      "external": "External",
+      "unsupported": "No build for this system",
+      "finishing": "Finishing…"
+    },
+    "external": "It lives outside Segno's folder (development or system): Segno does not update it.",
+    "unsupported": "Segno cannot install it here: it uses the system's, if there is one.",
+    "pending": "{{version}} is downloaded: it is used from the next start.",
+    "checked": "Checked on {{date}}",
+    "error": "Last attempt: {{error}}",
+    "check": "Check for updates",
+    "checking": "Checking…",
+    "statusInstalling": "Installing tools: {{list}}",
+    "statusFailed": "The tools could not be installed",
+    "statusMissing": "Missing: {{list}}",
+    "statusPending": "Tool update ready for the next start"
   }
 }

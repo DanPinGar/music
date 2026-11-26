@@ -91,6 +91,7 @@ A Cargo workspace split by responsibility, with a hexagonal architecture: the do
 | `storage`                | Repositories on SQLite (sqlx) and files (`object_store`: local disk today, S3 tomorrow). PostgreSQL will be another implementation of the same traits |
 | `jobs`                   | Persistent queue in SQLite with retries, cancellation and progress; manages the Python processes                                                      |
 | `media`                  | yt-dlp and ffmpeg: downloads, seek proxy, thumbnails, audio extraction, waveform peaks and attack detection                                           |
+| `tools`                  | Installs and updates ffmpeg, yt-dlp and Deno from their GitHub releases, checking each download; also the `pnpm tools` command                        |
 | `midi`                   | Real-time MIDI input/output (midir) and .mid files (midly)                                                                                            |
 | `api`                    | Axum router: REST + WebSocket, OpenAPI (utoipa), RFC 9457 errors (problem+json)                                                                       |
 | `apps/desktop`           | Tauri 2: window, startup of the embedded API, dialogs, updates                                                                                        |
@@ -170,18 +171,18 @@ Library/
 
 **Main tables:**
 
-| Table                               | Key fields                                                                                     |
-| ----------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `videos`                            | id, source (youtube/file), source_url, title, channel, duration_ms, fps, width, height, status |
-| `video_states`                      | video_id, state (JSON: position, speed, step unit, zoom, beat grid, loop, practice)            |
-| `tags`, `video_tags`, `collections` | library organisation                                                                           |
-| `markers`                           | id, video_id, kind (point/section/loop), start_ms, end_ms, label, color                        |
-| `comments`                          | id, video_id, start_ms, end_ms, body (Markdown); a bar or note anchor once there is a score    |
-| `jobs`                              | id, video_id, kind, status, progress, params, error, attempts, timestamps                      |
-| `artifacts`                         | id, video_id, kind, schema, producer@version, params_hash, parents, path                       |
-| `note_revisions`                    | id, video_id, number, parent, author (auto/user), artifact_id                                  |
-| `practice_sessions`                 | id, video_id, range, speed, hits, timing deviation                                             |
-| `settings`                          | preferences and keymaps (keys, pedals and MIDI messages → commands)                            |
+| Table                       | Key fields                                                                                                   |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `videos`                    | id, source (youtube/file), source_url, title, channel, duration_ms, fps, width, height, status, import_error |
+| `video_states`              | video_id, state (JSON: position, speed, step unit, zoom, beat grid, loop, practice)                          |
+| `video_tags`, `collections` | library organisation: a video's tags in order (names, compared ignoring case); collections later             |
+| `markers`                   | id, video_id, kind (point/section/loop), start_ms, end_ms, label, color                                      |
+| `comments`                  | id, video_id, start_ms, end_ms, body (Markdown); a bar or note anchor once there is a score                  |
+| `jobs`                      | id, video_id, kind, status, progress, params, error, attempts, timestamps                                    |
+| `artifacts`                 | id, video_id, kind, schema, producer@version, params_hash, parents, path                                     |
+| `note_revisions`            | id, video_id, number, parent, author (auto/user), artifact_id                                                |
+| `practice_sessions`         | id, video_id, range, speed, hits, timing deviation                                                           |
+| `settings`                  | preferences and keymaps (keys, pedals and MIDI messages → commands)                                          |
 
 Conventions ready for future sync: **UUIDv7** IDs, `created_at` and `updated_at` on every row, soft deletes (`deleted_at`) and immutable artifacts.
 
@@ -190,7 +191,7 @@ Conventions ready for future sync: **UUIDv7** IDs, `created_at` and `updated_at`
 - The API listens only on 127.0.0.1, on a random port, with a per-session token known only to the UI. CORS is limited to the Tauri origin and the Host header is checked (against DNS rebinding).
 - Minimal Tauri capabilities and a strict CSP.
 - The Python engine needs no network: the core downloads the models.
-- yt-dlp and ffmpeg are kept up to date, since they process external content.
+- yt-dlp, Deno and ffmpeg are kept up to date, since they process external content. Each download comes over HTTPS (the system's TLS) from the project's GitHub releases and is installed only if its SHA-256 matches the checksum the project publishes and the digest GitHub computed on upload.
 
 ### 3.8 Path to the cloud (when needed)
 
@@ -213,12 +214,22 @@ Configuration and adapters change (PostgreSQL repositories, S3 storage, external
 
 ### 4.1 Library and downloads
 
-- **yt-dlp** + **ffmpeg** + the JavaScript runtime that yt-dlp now needs for YouTube (Deno or another supported one). The app downloads and updates them itself, because YouTube changes often.
+- **yt-dlp** + **ffmpeg** + the JavaScript runtime that yt-dlp now needs for YouTube (**Deno**), as standalone executables that the core runs. **The app installs and updates them itself** in its data folder (`tools/`), because YouTube changes often:
+  - on the first start it downloads the three at once (about 145 MB, some 15 s on a fast connection) while the app is already usable; the status bar shows the progress, and imports and downloads start working as soon as their tools are ready, without a restart;
+  - it looks for new releases every day for yt-dlp and every week for Deno and ffmpeg. ffmpeg's LGPL builds are rebuilt daily under the same name, so a new build is installed only once it is a month newer, or on a new FFmpeg branch;
+  - a newer yt-dlp or Deno replaces the old one at once, even while it runs (the old file is renamed aside and removed at the next start); a newer ffmpeg, whose libraries running ffmpegs keep open, is unpacked next to it and swapped in at the next start;
+  - of ffmpeg's build it keeps only `bin/` (without ffplay) and the licence: 151 MB instead of 184;
+  - the tools dialog (command palette, or the status bar) shows each tool's version and state, the last check, errors, and a button to look for updates now;
+  - while developing, the tools in the repository's `.tools/` (filled by `pnpm tools`, the same installer) are used and left alone; `SEGNO_TOOLS_DIR` points the app at a throwaway folder to try the installation;
+  - ffmpeg has LGPL builds for Windows only: elsewhere the system's ffmpeg is used.
 - Preferred format: H.264/AAC in MP4 up to 1080p, **favouring 60 fps** when available: it doubles the time resolution of vision transcription.
-- Metadata and thumbnail are stored, and **YouTube chapters become initial markers**.
+- A download first reads the video's details (title, channel, duration, chapters), which the card shows at once, then downloads. yt-dlp loads the details it already read instead of extracting them again: YouTube's JavaScript challenges are solved once, and the Monk video downloads in about 7 s instead of 16 s.
+- Metadata and thumbnail are stored, and **YouTube chapters become initial sections** (only on a video without markers, so a retry never repeats them).
+- A link already in the library is not downloaded twice. Links are pasted into the `Ctrl+D` dialog, or anywhere in the library.
 - Drag-and-drop import of local files (MP4, MKV, WebM, MOV) and also **MIDI or MusicXML**, to attach exact notes to a video without transcribing.
 - After a download or import, the video is **prepared for navigation** in the background ([§4.2](#media-prepared-for-instant-seeking)); it can be played straight away while that runs.
-- Background queue with progress, cancellation and retries. The app reminds users that they are responsible for how they use downloads.
+- Background queue with progress by stage (waiting, reading the details, downloading, finishing), cancellation (deleting a video stops its download and removes its files) and retries. Downloads interrupted by closing the app start again on the next launch. The app reminds users that they are responsible for how they use downloads.
+- The library searches titles, channels and tags (ignoring case and accents), filters by tag, and sorts by date added, last studied or title. Each card shows how far the video was studied (a bar on the thumbnail and "continue at"), and its menu renames, tags and deletes it.
 
 ### 4.2 Song navigation (top priority)
 
@@ -534,7 +545,7 @@ music/
 │  └─ schemas-ts/       TypeScript types generated from schemas/
 ├─ schemas/             JSON Schema for jobs and artifacts (source of truth)
 ├─ eval/                evaluation harness (test videos are not committed)
-├─ scripts/             developer scripts (e.g. fetch_tools.py → .tools/)
+├─ scripts/             developer scripts (git hook environment)
 ├─ docs/                PLAN.md and adr/ (decision records)
 └─ .github/workflows/   CI
 ```
@@ -582,7 +593,13 @@ Each phase ends with something usable and a verifiable exit criterion.
 
    _See 4.2 and 4.3.)_
 4. Comments anchored to time. _(Done: Markdown, on a moment or a stretch, with time links, a filterable panel, on the timeline and in its hover preview; see 4.3.)_
-5. YouTube downloads, chapters as markers, and the library (search, tags, remembered state).
+5. YouTube downloads, chapters as markers, and the library (search, tags, remembered state). _(Done:_
+   - _downloads with yt-dlp and Deno in a background queue, with progress by stage, retries, and cancellation by deleting;_
+   - _chapters as sections;_
+   - _search, tag filter, sorting, renaming, tags, deletion, and how far each video was studied;_
+   - _ffmpeg, yt-dlp and Deno installed and kept up to date by the app itself._
+
+   _See 4.1.)_
 
 - Navigation is tried with real videos from the first build, then adjusted and measured.
 - _Exit criterion:_ the navigation budget is met on your laptop, and you use the app daily to study.
@@ -648,46 +665,50 @@ Each phase ends with something usable and a verifiable exit criterion.
 
 Checked on your laptop (Windows 11, Intel i7-1255U, 16 GB RAM, Intel Iris Xe integrated GPU):
 
-| Tool                                                          | Where                                                               |
-| ------------------------------------------------------------- | ------------------------------------------------------------------- |
-| Git 2.42, Node 22.17, pnpm 11.10, Python 3.13.5, WebView2     | System (already present)                                            |
-| Visual Studio Build Tools 2022 (C++) + Windows SDK 10.0.26100 | System: the only system-wide install, required by Rust and Tauri    |
-| Rust 1.100.0 (rustup)                                         | User profile; the version is pinned in `rust-toolchain.toml`        |
-| uv 0.13.9                                                     | User profile (winget)                                               |
-| Python packages, yt-dlp and Deno                              | `engine/.venv` (yt-dlp and Deno in the `tools` group)               |
-| ffmpeg 9.0 (LGPL)                                             | `.tools/ffmpeg`, fetched by `pnpm tools` with checksum verification |
+| Tool                                                          | Where                                                                   |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| Git 2.42, Node 22.17, pnpm 11.10, Python 3.13.5, WebView2     | System (already present)                                                |
+| Visual Studio Build Tools 2022 (C++) + Windows SDK 10.0.26100 | System: the only system-wide install, required by Rust and Tauri        |
+| Rust 1.100.0 (rustup)                                         | User profile; the version is pinned in `rust-toolchain.toml`            |
+| uv 0.13.9                                                     | User profile (winget)                                                   |
+| Python packages                                               | `engine/.venv` (yt-dlp and Deno also in its `tools` group, for scripts) |
+| ffmpeg 9.0 (LGPL), yt-dlp 2026.11.23, Deno 2.9.8              | `.tools/`, installed by `pnpm tools` (the app's own installer)          |
 
 Without an NVIDIA GPU, everything is designed to run well on the CPU, with optional acceleration; the Intel GPU's Quick Sync encoder speeds up proxy creation.
 
 ## 11. Decision log
 
-| Decision                       | Chosen                                                                         | Alternatives                           | Reason                                                                                              |
-| ------------------------------ | ------------------------------------------------------------------------------ | -------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| Goal                           | Local, cloud-ready                                                             | Personal use only; SaaS from the start | No server costs or YouTube blocking, without closing the door to scaling                            |
-| Top priority                   | Instant, comfortable navigation                                                | —                                      | Chosen by you: moving around the song is the core of studying it                                    |
-| App                            | Tauri 2 + React/TypeScript                                                     | Electron; web SaaS; PySide6            | Light, secure, cross-platform, mobile possible, UI reusable on the web                              |
-| Local backend                  | Rust core + Python engine                                                      | Everything in Python (FastAPI)         | Instant start-up, features 1–4 without Python, engine on demand, scalable workers                   |
-| UI ↔ core                      | HTTP + WebSocket on localhost with a token                                     | Tauri IPC (commands)                   | The same API will serve the web version; the local port is protected with a token and a Host check  |
-| Playback media                 | Seek-optimised proxy (keyframe ≤ 15 frames apart, GPU encoder or OpenH264)     | Playing the downloaded file directly   | Jumps and frame steps about 10× faster (measured, 4.2); keeps ffmpeg within the LGPL                |
-| Attack detection               | Log filtered spectral flux, attacks ≥ 50 ms apart                              | SuperFlux as published                 | F 0.95 against 0.83 on real piano (measured, 4.2): a piano has no vibrato to filter out             |
-| Timeline drawing               | Canvas drawn outside React, every animation frame                              | SVG or DOM elements per tick           | 60 fps while playing and zooming, with thousands of attacks                                         |
-| Player state                   | A runtime class outside React plus a Zustand store per video                   | React state and effects                | Commands, timeline and loop engine share it without re-renders; seeks feed the history in one place |
-| Saved study state              | One validated JSON document per video, every field with a default              | A column per setting                   | Grows with the player without migrations; older documents still load                                |
-| Beat grid                      | Tapped beats snapped to attacks, extrapolated at the ends                      | A single tempo and offset              | Keeps rubato (jazz ballads), and tapping only a few bars still gives a whole grid                   |
-| Playback engine                | Native `<video>` first; Web Audio + time-stretching if measurements require it | Web Audio from day one                 | Start simple, upgrade on evidence                                                                   |
-| Beat grid before transcription | Tap tempo                                                                      | Wait until Phase 2                     | Musical navigation from the first version                                                           |
-| Transcription                  | Hybrid vision + audio                                                          | Vision only; audio only                | Precision and hands from vision, plus dynamics, pedal and fallback from audio                       |
-| Sheet music                    | Verovio                                                                        | OpenSheetMusicDisplay; VexFlow         | Better engraving and a timemap to sync with the video                                               |
-| AI inference                   | ONNX Runtime                                                                   | PyTorch in production                  | Small package, good CPU performance, GPUs from any vendor                                           |
-| MIDI input                     | Rust core (midir)                                                              | Web MIDI                               | Works the same on Windows and macOS (WebKit has no Web MIDI)                                        |
-| Harmony in v1                  | Academic level                                                                 | Functional; chords and key             | Chosen by you                                                                                       |
-| Priority                       | Base app + vision prototype                                                    | Base first; transcription first        | A useful app early, and the most uncertain part validated early                                     |
-| Licences                       | Permissive only                                                                | Allowing GPL or "non-commercial"       | Keeps the commercial option open                                                                    |
-| Language                       | English for code, comments, commits and docs; UI in Spanish and English        | Spanish documentation                  | Chosen by you                                                                                       |
-| Name                           | Segno (`io.github.danpingar.segno`)                                            | Rubato; Leggio                         | Chosen by you: the score's "jump back here" sign suits a navigation-first app                       |
-| UI components                  | shadcn/ui on Base UI                                                           | shadcn/ui on Radix; React Aria         | shadcn's current default, maintained by the original Radix authors                                  |
-| JSON naming                    | `snake_case` ([ADR 0002](adr/0002-http-api-conventions.md))                    | camelCase                              | One naming scheme across Rust, Python and TypeScript                                                |
-| Developer tools                | Project-local (`node_modules`, `engine/.venv`, `.tools/`)                      | Global installs                        | Chosen by you: reproducible, nothing leaks into the system except the C++ build tools               |
+| Decision                       | Chosen                                                                                          | Alternatives                                  | Reason                                                                                                                  |
+| ------------------------------ | ----------------------------------------------------------------------------------------------- | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Goal                           | Local, cloud-ready                                                                              | Personal use only; SaaS from the start        | No server costs or YouTube blocking, without closing the door to scaling                                                |
+| Top priority                   | Instant, comfortable navigation                                                                 | —                                             | Chosen by you: moving around the song is the core of studying it                                                        |
+| App                            | Tauri 2 + React/TypeScript                                                                      | Electron; web SaaS; PySide6                   | Light, secure, cross-platform, mobile possible, UI reusable on the web                                                  |
+| Local backend                  | Rust core + Python engine                                                                       | Everything in Python (FastAPI)                | Instant start-up, features 1–4 without Python, engine on demand, scalable workers                                       |
+| UI ↔ core                      | HTTP + WebSocket on localhost with a token                                                      | Tauri IPC (commands)                          | The same API will serve the web version; the local port is protected with a token and a Host check                      |
+| Playback media                 | Seek-optimised proxy (keyframe ≤ 15 frames apart, GPU encoder or OpenH264)                      | Playing the downloaded file directly          | Jumps and frame steps about 10× faster (measured, 4.2); keeps ffmpeg within the LGPL                                    |
+| Attack detection               | Log filtered spectral flux, attacks ≥ 50 ms apart                                               | SuperFlux as published                        | F 0.95 against 0.83 on real piano (measured, 4.2): a piano has no vibrato to filter out                                 |
+| Timeline drawing               | Canvas drawn outside React, every animation frame                                               | SVG or DOM elements per tick                  | 60 fps while playing and zooming, with thousands of attacks                                                             |
+| Player state                   | A runtime class outside React plus a Zustand store per video                                    | React state and effects                       | Commands, timeline and loop engine share it without re-renders; seeks feed the history in one place                     |
+| Saved study state              | One validated JSON document per video, every field with a default                               | A column per setting                          | Grows with the player without migrations; older documents still load                                                    |
+| Beat grid                      | Tapped beats snapped to attacks, extrapolated at the ends                                       | A single tempo and offset                     | Keeps rubato (jazz ballads), and tapping only a few bars still gives a whole grid                                       |
+| Playback engine                | Native `<video>` first; Web Audio + time-stretching if measurements require it                  | Web Audio from day one                        | Start simple, upgrade on evidence                                                                                       |
+| Beat grid before transcription | Tap tempo                                                                                       | Wait until Phase 2                            | Musical navigation from the first version                                                                               |
+| Transcription                  | Hybrid vision + audio                                                                           | Vision only; audio only                       | Precision and hands from vision, plus dynamics, pedal and fallback from audio                                           |
+| Sheet music                    | Verovio                                                                                         | OpenSheetMusicDisplay; VexFlow                | Better engraving and a timemap to sync with the video                                                                   |
+| AI inference                   | ONNX Runtime                                                                                    | PyTorch in production                         | Small package, good CPU performance, GPUs from any vendor                                                               |
+| MIDI input                     | Rust core (midir)                                                                               | Web MIDI                                      | Works the same on Windows and macOS (WebKit has no Web MIDI)                                                            |
+| Harmony in v1                  | Academic level                                                                                  | Functional; chords and key                    | Chosen by you                                                                                                           |
+| Priority                       | Base app + vision prototype                                                                     | Base first; transcription first               | A useful app early, and the most uncertain part validated early                                                         |
+| Licences                       | Permissive only                                                                                 | Allowing GPL or "non-commercial"              | Keeps the commercial option open                                                                                        |
+| Language                       | English for code, comments, commits and docs; UI in Spanish and English                         | Spanish documentation                         | Chosen by you                                                                                                           |
+| Name                           | Segno (`io.github.danpingar.segno`)                                                             | Rubato; Leggio                                | Chosen by you: the score's "jump back here" sign suits a navigation-first app                                           |
+| UI components                  | shadcn/ui on Base UI                                                                            | shadcn/ui on Radix; React Aria                | shadcn's current default, maintained by the original Radix authors                                                      |
+| JSON naming                    | `snake_case` ([ADR 0002](adr/0002-http-api-conventions.md))                                     | camelCase                                     | One naming scheme across Rust, Python and TypeScript                                                                    |
+| Developer tools                | Project-local (`node_modules`, `engine/.venv`, `.tools/`)                                       | Global installs                               | Chosen by you: reproducible, nothing leaks into the system except the C++ build tools                                   |
+| YouTube downloads              | yt-dlp's standalone executable + Deno, run by the core                                          | yt-dlp as a library in the Python engine      | Features 1–4 without Python, as planned; the executables update without a new app release                               |
+| Tags                           | A `video_tags` table                                                                            | A JSON column in `videos`                     | Tag filters and counts in SQL, and renaming a tag everywhere in one statement                                           |
+| Installing the tools           | The core downloads them from GitHub releases, checking SHA-256; `pnpm tools` runs the same code | Bundling them in the installer; yt-dlp's `-U` | A small installer, yt-dlp updated within a day of a YouTube change, one source of truth for the app, CI and development |
+| HTTP client for the installer  | reqwest with the system's TLS (SChannel on Windows)                                             | rustls with aws-lc-rs                         | The system's certificates and proxies, and no C toolchain beyond what Tauri already needs                               |
 
 ## 12. Open questions
 

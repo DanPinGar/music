@@ -1,7 +1,8 @@
 import { useTranslation } from "react-i18next";
 import { useSystemInfo } from "@/api/use-system-info";
+import { ToolsStatus } from "@/features/tools/tools-status";
 
-/** Bottom bar: connection to the core, its version and where the library lives. */
+/** Bottom bar: connection to the core, its version, its tools and where the library lives. */
 export function StatusBar() {
   const { t } = useTranslation();
   const system = useSystemInfo();
@@ -21,9 +22,7 @@ export function StatusBar() {
             <span className="size-1.5 rounded-full bg-emerald-500" />
             {t("status.connected", { version: system.data.version })}
           </span>
-          {!system.data.ffmpeg_version && (
-            <span className="text-amber-500">{t("status.noFfmpeg")}</span>
-          )}
+          <ToolsStatus />
           {system.data.library_path && (
             <span className="ml-auto truncate" title={system.data.library_path}>
               {t("status.library", { path: system.data.library_path })}

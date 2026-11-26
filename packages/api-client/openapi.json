@@ -63,6 +63,88 @@
         ]
       }
     },
+    "/tools": {
+      "get": {
+        "tags": [
+          "tools"
+        ],
+        "summary": "The external tools (ffmpeg, yt-dlp, Deno): versions in use, installs and updates running.",
+        "operationId": "list_tools",
+        "responses": {
+          "200": {
+            "description": "The tools",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolsDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "token": []
+          }
+        ]
+      }
+    },
+    "/tools/check": {
+      "post": {
+        "tags": [
+          "tools"
+        ],
+        "summary": "Installs the missing tools and looks for newer releases now, in the background.",
+        "operationId": "check_tools",
+        "responses": {
+          "202": {
+            "description": "Checking; follow it with GET /tools",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolsDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "This core does not manage its tools",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "token": []
+          }
+        ]
+      }
+    },
     "/videos": {
       "get": {
         "tags": [
@@ -86,6 +168,82 @@
           },
           "401": {
             "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "token": []
+          }
+        ]
+      }
+    },
+    "/videos/download": {
+      "post": {
+        "tags": [
+          "videos"
+        ],
+        "summary": "Downloads a YouTube video into the library in the background (its progress is in the\nvideo's `download`), then prepares it for navigation. Its chapters become sections. A\nvideo already in the library is returned as it is.",
+        "operationId": "download_video",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DownloadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The video was already in the library",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoDto"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "The video, queued to download",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not the address of a YouTube video",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "yt-dlp or ffmpeg is not available",
             "content": {
               "application/json": {
                 "schema": {
@@ -194,6 +352,131 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/VideoDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such video",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "token": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "videos"
+        ],
+        "summary": "Removes a video from the library with its media files, stopping its download if it is\nstill downloading.",
+        "operationId": "delete_video",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Video id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such video",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "token": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "videos"
+        ],
+        "summary": "Renames a video or replaces its tags.",
+        "operationId": "edit_video",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Video id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VideoChangesDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The video as saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "An empty title, or too many or too long tags",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
                 }
               }
             }
@@ -964,6 +1247,84 @@
         ]
       }
     },
+    "/videos/{id}/retry": {
+      "post": {
+        "tags": [
+          "videos"
+        ],
+        "summary": "Downloads a failed YouTube video again.",
+        "operationId": "retry_video",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Video id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The video, queued to download again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The video is not a failed download",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such video",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "yt-dlp or ffmpeg is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "token": []
+          }
+        ]
+      }
+    },
     "/videos/{id}/state": {
       "get": {
         "tags": [
@@ -1278,6 +1639,47 @@
             "format": "int64"
           }
         }
+      },
+      "DownloadDto": {
+        "type": "object",
+        "description": "Progress of downloading a video from YouTube.",
+        "required": [
+          "stage",
+          "progress"
+        ],
+        "properties": {
+          "progress": {
+            "type": "number",
+            "format": "double",
+            "description": "The whole download, from 0 to 1."
+          },
+          "stage": {
+            "$ref": "#/components/schemas/DownloadStageDto"
+          }
+        }
+      },
+      "DownloadRequest": {
+        "type": "object",
+        "description": "A YouTube video to download.",
+        "required": [
+          "url"
+        ],
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "Its address: a watch, youtu.be, shorts or music link."
+          }
+        }
+      },
+      "DownloadStageDto": {
+        "type": "string",
+        "description": "The step running, in order: waiting, reading the details, downloading, finishing.",
+        "enum": [
+          "queued",
+          "fetching",
+          "downloading",
+          "finishing"
+        ]
       },
       "Health": {
         "type": "object",
@@ -1623,7 +2025,7 @@
               "string",
               "null"
             ],
-            "description": "Version of the ffmpeg in use; `None` when it was not found."
+            "description": "Version of the ffmpeg in use; `None` while it is missing (no imports)."
           },
           "library_id": {
             "type": "string",
@@ -1644,6 +2046,13 @@
           "version": {
             "type": "string",
             "description": "Version of the core."
+          },
+          "ytdlp_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Version of the yt-dlp in use; `None` while it is missing (no YouTube downloads)."
           }
         }
       },
@@ -1708,6 +2117,122 @@
           }
         }
       },
+      "ToolDto": {
+        "type": "object",
+        "description": "An external tool: its version in use, and what the core is doing with it.",
+        "required": [
+          "name",
+          "state"
+        ],
+        "properties": {
+          "checked_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the core last looked for a newer release."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the last install or update failed."
+          },
+          "name": {
+            "$ref": "#/components/schemas/ToolNameDto"
+          },
+          "pending_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A newer version already downloaded, used from the next start."
+          },
+          "progress": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Download progress while installing or updating, from 0 to 1."
+          },
+          "state": {
+            "$ref": "#/components/schemas/ToolStateDto"
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Version in use, as the tool reports it."
+          }
+        }
+      },
+      "ToolNameDto": {
+        "type": "string",
+        "description": "An external tool the core runs.",
+        "enum": [
+          "ffmpeg",
+          "yt-dlp",
+          "deno"
+        ]
+      },
+      "ToolStateDto": {
+        "type": "string",
+        "description": "Where a tool stands.",
+        "enum": [
+          "ready",
+          "missing",
+          "installing",
+          "updating",
+          "external",
+          "unsupported"
+        ]
+      },
+      "ToolsDto": {
+        "type": "object",
+        "description": "The external tools and what the core does with them.",
+        "required": [
+          "managed",
+          "tools"
+        ],
+        "properties": {
+          "managed": {
+            "type": "boolean",
+            "description": "Whether the core installs and updates its tools itself."
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ToolDto"
+            }
+          }
+        }
+      },
+      "VideoChangesDto": {
+        "type": "object",
+        "description": "Changes to a video: each field only when given.",
+        "properties": {
+          "tags": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Replaces all the video's tags."
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "VideoDto": {
         "type": "object",
         "description": "A video in the library.",
@@ -1719,6 +2244,7 @@
           "seek_proxy",
           "has_peaks",
           "has_attacks",
+          "tags",
           "created_at",
           "updated_at"
         ],
@@ -1732,6 +2258,17 @@
           "created_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "download": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DownloadDto",
+                "description": "Present while the video is being downloaded from YouTube."
+              }
+            ]
           },
           "duration_ms": {
             "type": [
@@ -1767,6 +2304,21 @@
             "type": "string",
             "format": "uuid"
           },
+          "import_error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the download or import failed (status `failed`), if it did."
+          },
+          "position_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Where the user left the video, if they have opened it."
+          },
           "preparation": {
             "oneOf": [
               {
@@ -1801,6 +2353,20 @@
           },
           "status": {
             "$ref": "#/components/schemas/VideoStatusDto"
+          },
+          "studied_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the user last studied the video."
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "thumbnails": {
             "oneOf": [
@@ -1925,6 +2491,10 @@
     {
       "name": "study",
       "description": "Where the user left each video, and its markers"
+    },
+    {
+      "name": "tools",
+      "description": "The external tools the core runs, installed and updated by itself"
     }
   ]
 }

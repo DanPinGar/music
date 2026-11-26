@@ -145,8 +145,39 @@ pub struct Video {
     pub attacks_file: Option<String>,
     /// Why preparing the media for navigation failed, if it did.
     pub preparation_error: Option<String>,
+    /// Why the download or import failed, if it did (status failed).
+    pub import_error: Option<String>,
+    /// The user's labels for organising the library ("Jazz", "To learn"…).
+    pub tags: Vec<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+const MAX_TAGS: usize = 20;
+const MAX_TAG_CHARS: usize = 40;
+const MAX_TITLE_CHARS: usize = 300;
+
+/// Tags trimmed, without empty ones or repeats (ignoring case), in the order given.
+pub fn clean_tags(tags: &[String]) -> Result<Vec<String>> {
+    let mut clean: Vec<String> = Vec::new();
+    for tag in tags {
+        let tag = tag.trim();
+        if tag.is_empty() || clean.iter().any(|kept| kept.eq_ignore_ascii_case(tag)) {
+            continue;
+        }
+        if tag.chars().count() > MAX_TAG_CHARS {
+            return Err(DomainError::Invalid(format!(
+                "tags are at most {MAX_TAG_CHARS} characters"
+            )));
+        }
+        clean.push(tag.to_owned());
+    }
+    if clean.len() > MAX_TAGS {
+        return Err(DomainError::Invalid(format!(
+            "a video has at most {MAX_TAGS} tags"
+        )));
+    }
+    Ok(clean)
 }
 
 impl Video {
@@ -158,6 +189,24 @@ impl Video {
                 || self.thumbnails_file.is_none()
                 || self.peaks_file.is_none()
                 || self.attacks_file.is_none())
+    }
+
+    /// Renames the video and replaces its tags (each only when given).
+    pub fn edit(&mut self, title: Option<&str>, tags: Option<&[String]>) -> Result<()> {
+        if let Some(title) = title {
+            let title = title.trim();
+            if title.is_empty() || title.chars().count() > MAX_TITLE_CHARS {
+                return Err(DomainError::Invalid(format!(
+                    "a title has between 1 and {MAX_TITLE_CHARS} characters"
+                )));
+            }
+            self.title = title.to_owned();
+        }
+        if let Some(tags) = tags {
+            self.tags = clean_tags(tags)?;
+        }
+        self.updated_at = Utc::now();
+        Ok(())
     }
 
     /// Copies the technical facts of the media into the entry.
@@ -197,6 +246,8 @@ impl Video {
             peaks_file: None,
             attacks_file: None,
             preparation_error: None,
+            import_error: None,
+            tags: Vec::new(),
             created_at: now,
             updated_at: now,
         })
@@ -216,6 +267,10 @@ pub trait VideoRepository: Send + Sync {
 
     /// Saves every field of an existing video, as given (callers set `updated_at`).
     async fn update(&self, video: &Video) -> Result<()>;
+
+    /// Removes a video from the library (softly, for future sync), or
+    /// [`DomainError::NotFound`].
+    async fn delete(&self, id: VideoId) -> Result<()>;
 }
 
 #[cfg(test)]
@@ -234,6 +289,30 @@ mod tests {
     fn a_title_is_required() {
         let err = Video::new_importing(VideoSource::File, "   ", None).unwrap_err();
         assert!(matches!(err, DomainError::Invalid(_)));
+    }
+
+    #[test]
+    fn tags_are_trimmed_and_kept_once() {
+        let tags: Vec<String> = ["  Jazz ", "jazz", "", "To learn", "JAZZ"]
+            .map(String::from)
+            .to_vec();
+        assert_eq!(clean_tags(&tags).unwrap(), ["Jazz", "To learn"]);
+        assert!(clean_tags(&["x".repeat(41)]).is_err());
+    }
+
+    #[test]
+    fn videos_are_renamed_and_tagged() {
+        let mut video = Video::new_importing(VideoSource::File, "clip", None).unwrap();
+        video
+            .edit(Some("  Monk  "), Some(&["Ballad".to_owned()]))
+            .unwrap();
+        assert_eq!(
+            (video.title.as_str(), video.tags.as_slice()),
+            ("Monk", ["Ballad".to_owned()].as_slice())
+        );
+        video.edit(None, None).unwrap();
+        assert_eq!(video.title, "Monk");
+        assert!(video.edit(Some("  "), None).is_err());
     }
 
     #[test]

@@ -24,7 +24,47 @@
       "importing": "Importando",
       "ready": "Listo",
       "failed": "Error"
-    }
+    },
+    "download": "Descargar de YouTube",
+    "downloadTitle": "Descargar un vídeo de YouTube",
+    "downloadDescription": "Pega el enlace del vídeo. Se descarga con la mejor calidad hasta 1080p, con sus capítulos como secciones.",
+    "downloadUrl": "Enlace de YouTube",
+    "downloadInvalid": "Eso no es un enlace a un vídeo de YouTube.",
+    "downloadNotice": "Descarga solo vídeos que tengas derecho a guardar, para tu estudio personal.",
+    "downloadStart": "Descargar",
+    "downloadQueued": "Descarga en cola",
+    "downloadExists": "{{title}} ya está en la biblioteca",
+    "downloadFailed": "No se ha podido descargar el vídeo",
+    "downloadError": "La descarga ha fallado: pasa el ratón para ver el motivo",
+    "importError": "La importación ha fallado: pasa el ratón para ver el motivo",
+    "emptyDownload": "o pega aquí un enlace de YouTube, o pulsa",
+    "search": "Busca por título, canal o etiqueta…",
+    "sort": "Ordenar",
+    "orders": {
+      "added": "Añadidos recientemente",
+      "studied": "Estudiados recientemente",
+      "title": "Título"
+    },
+    "allTags": "Todos",
+    "noMatches": "Ningún vídeo coincide con la búsqueda.",
+    "clearFilters": "Quitar filtros",
+    "count": "{{shown}} de {{total}} vídeos",
+    "resume": "Sigue en {{time}}",
+    "actions": "Más acciones",
+    "edit": "Renombrar y etiquetas…",
+    "editTitle": "Editar el vídeo",
+    "editName": "Título",
+    "editTags": "Etiquetas",
+    "editTagsHint": "Separadas por comas, p. ej. Jazz, Por aprender",
+    "editFailed": "No se han podido guardar los cambios",
+    "save": "Guardar",
+    "delete": "Eliminar…",
+    "deleteTitle": "¿Eliminar «{{title}}»?",
+    "deleteBody": "El vídeo y sus archivos salen de la biblioteca, y con ellos sus marcadores y comentarios.",
+    "deleteConfirm": "Eliminar",
+    "deleted": "{{title}} eliminado",
+    "deleteFailed": "No se ha podido eliminar el vídeo",
+    "downloadWaiting": "Segno aún está instalando las herramientas que necesitan las descargas: podrás descargar en cuanto termine."
   },
   "player": {
     "title": "Reproductor",
@@ -117,7 +157,10 @@
     "jumpToMarker": "Ir al marcador 1–9",
     "toggleMarkersPanel": "Mostrar u ocultar el panel de marcadores",
     "addComment": "Comentar aquí",
-    "showComments": "Mostrar los comentarios"
+    "showComments": "Mostrar los comentarios",
+    "downloadVideo": "Descargar un vídeo de YouTube",
+    "searchLibrary": "Buscar en la biblioteca",
+    "showTools": "Ver las herramientas externas"
   },
   "commandGroups": {
     "general": "General",
@@ -135,8 +178,7 @@
     "connecting": "Conectando con el núcleo…",
     "connected": "Segno {{version}}",
     "disconnected": "Sin conexión con el núcleo",
-    "library": "Biblioteca: {{path}}",
-    "noFfmpeg": "ffmpeg no encontrado: no se pueden importar vídeos"
+    "library": "Biblioteca: {{path}}"
   },
   "language": {
     "other": "English",
@@ -215,5 +257,41 @@
     "help": "Ctrl+Intro guarda · Esc cancela",
     "cancel": "Cancelar",
     "save": "Guardar"
+  },
+  "download": {
+    "queued": "En cola para descargar…",
+    "fetching": "Leyendo los datos del vídeo…",
+    "downloading": "Descargando… {{percent}} %",
+    "finishing": "Terminando la descarga…"
+  },
+  "tools": {
+    "title": "Herramientas externas",
+    "description": "Segno las instala y las mantiene al día por sí mismo, comprobando cada descarga con su suma de verificación publicada.",
+    "notManaged": "Este núcleo usa las herramientas que encuentra y no las actualiza.",
+    "purpose": {
+      "ffmpeg": "Importa y prepara los vídeos",
+      "yt-dlp": "Descarga de YouTube",
+      "deno": "La necesita yt-dlp para leer YouTube"
+    },
+    "state": {
+      "ready": "Instalada",
+      "missing": "No instalada",
+      "installing": "Instalando… {{percent}} %",
+      "updating": "Actualizando… {{percent}} %",
+      "external": "Externa",
+      "unsupported": "Sin versión para este sistema",
+      "finishing": "Terminando…"
+    },
+    "external": "Está fuera de la carpeta de Segno (desarrollo o sistema): Segno no la actualiza.",
+    "unsupported": "Segno no puede instalarla aquí: usa la del sistema, si la hay.",
+    "pending": "{{version}} ya está descargada: se usará al volver a abrir Segno.",
+    "checked": "Comprobada el {{date}}",
+    "error": "Último intento: {{error}}",
+    "check": "Buscar actualizaciones",
+    "checking": "Comprobando…",
+    "statusInstalling": "Instalando herramientas: {{list}}",
+    "statusFailed": "No se han podido instalar las herramientas",
+    "statusMissing": "Falta: {{list}}",
+    "statusPending": "Actualización de herramientas lista para el próximo arranque"
   }
 }
