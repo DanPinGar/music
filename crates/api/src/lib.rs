@@ -95,6 +95,7 @@ fn protected_routes() -> OpenApiRouter<AppState> {
         .routes(routes!(routes::videos::get_media))
         .routes(routes!(routes::videos::get_thumbnails))
         .routes(routes!(routes::videos::get_peaks))
+        .routes(routes!(routes::videos::get_attacks))
 }
 
 /// The OpenAPI document of the API (source of the generated TypeScript client).

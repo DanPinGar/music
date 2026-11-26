@@ -1,7 +1,14 @@
 import type { ParseKeys } from "i18next";
 import { normalizeBinding } from "./keymap";
 
-export const COMMAND_GROUPS = ["general", "navigation", "playback", "loops", "markers"] as const;
+export const COMMAND_GROUPS = [
+  "general",
+  "navigation",
+  "playback",
+  "view",
+  "loops",
+  "markers",
+] as const;
 export type CommandGroup = (typeof COMMAND_GROUPS)[number];
 
 export interface Command {

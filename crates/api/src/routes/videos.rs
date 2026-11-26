@@ -35,6 +35,8 @@ pub struct VideoDto {
     pub thumbnails: Option<ThumbnailsDto>,
     /// Whether `/peaks` serves the audio waveform.
     pub has_peaks: bool,
+    /// Whether `/attacks` serves the attacks (note onsets) found in the audio.
+    pub has_attacks: bool,
     /// Present while the video is being prepared for navigation.
     pub preparation: Option<PreparationDto>,
     /// Why the preparation failed, if it did.
@@ -80,13 +82,36 @@ pub struct PreparationDto {
     pub progress: f64,
 }
 
+/// The step running, in order: waiting, the waveform peaks, the attacks, the seek proxy and
+/// the thumbnails.
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PreparationStageDto {
     Queued,
+    Peaks,
+    Attacks,
     SeekProxy,
     Thumbnails,
-    Peaks,
+}
+
+/// The audio waveform of a video, served by `/peaks`.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct PeaksDto {
+    pub version: u32,
+    /// Pairs per second of audio.
+    pub peaks_per_second: u32,
+    /// A minimum and a maximum per slot, in turn, from -127 to 127.
+    pub peaks: Vec<i8>,
+}
+
+/// The attacks (note onsets) found in a video's audio, served by `/attacks`.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct AttacksDto {
+    pub version: u32,
+    /// When each attack happens, in seconds, in order.
+    pub times: Vec<f64>,
+    /// How strong each attack is, from 0 to 1 (1 for the strong attacks of the video).
+    pub strengths: Vec<f32>,
 }
 
 impl VideoDto {
@@ -131,12 +156,14 @@ impl VideoDto {
             seek_proxy: video.proxy_file.is_some(),
             thumbnails,
             has_peaks: video.peaks_file.is_some(),
+            has_attacks: video.attacks_file.is_some(),
             preparation: progress.map(|progress| PreparationDto {
                 stage: match progress.stage {
                     None => PreparationStageDto::Queued,
+                    Some(PreparationStage::Peaks) => PreparationStageDto::Peaks,
+                    Some(PreparationStage::Attacks) => PreparationStageDto::Attacks,
                     Some(PreparationStage::SeekProxy) => PreparationStageDto::SeekProxy,
                     Some(PreparationStage::Thumbnails) => PreparationStageDto::Thumbnails,
-                    Some(PreparationStage::Peaks) => PreparationStageDto::Peaks,
                 },
                 progress: progress.done,
             }),
@@ -289,8 +316,7 @@ pub async fn get_thumbnails(
     serve(&state, video.thumbnails_file, "thumbnails", id, request).await
 }
 
-/// The audio waveform: `{"version": 1, "peaks_per_second": 100, "peaks": [min, max, …]}` with
-/// values from -127 to 127.
+/// The audio waveform: a minimum and a maximum per slot of audio.
 #[utoipa::path(
     get,
     path = "/videos/{id}/peaks",
@@ -298,7 +324,7 @@ pub async fn get_thumbnails(
     security(("token" = [])),
     params(("id" = Uuid, Path, description = "Video id")),
     responses(
-        (status = 200, description = "The waveform peaks, as JSON"),
+        (status = 200, description = "The waveform peaks", body = PeaksDto),
         (status = 401, description = "Missing or invalid token", body = Problem),
         (status = 404, description = "No such video, or no waveform yet", body = Problem)
     )
@@ -310,6 +336,28 @@ pub async fn get_peaks(
 ) -> Result<Response, ApiError> {
     let video = state.videos.get(VideoId::from_uuid(id)).await?;
     serve(&state, video.peaks_file, "waveform", id, request).await
+}
+
+/// The attacks (note onsets) found in the audio, for stepping from note to note.
+#[utoipa::path(
+    get,
+    path = "/videos/{id}/attacks",
+    tag = "videos",
+    security(("token" = [])),
+    params(("id" = Uuid, Path, description = "Video id")),
+    responses(
+        (status = 200, description = "The attacks", body = AttacksDto),
+        (status = 401, description = "Missing or invalid token", body = Problem),
+        (status = 404, description = "No such video, or no attacks yet", body = Problem)
+    )
+)]
+pub async fn get_attacks(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    request: Request,
+) -> Result<Response, ApiError> {
+    let video = state.videos.get(VideoId::from_uuid(id)).await?;
+    serve(&state, video.attacks_file, "attacks", id, request).await
 }
 
 async fn serve(

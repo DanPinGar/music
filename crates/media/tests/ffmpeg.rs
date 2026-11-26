@@ -190,6 +190,93 @@ async fn peaks_follow_the_audio() {
     assert!((14..=18).contains(&loudest), "{loudest}");
 }
 
+/// Three seconds of plucked notes (three harmonics, decaying) starting at known times, encoded
+/// as AAC like the audio of a downloaded video.
+fn make_notes(tools: &MediaTools, file: &Path, notes: &[(f64, f64)]) {
+    let expression = notes
+        .iter()
+        .map(|(start, frequency)| {
+            let phase = format!("PI*{frequency}*(t-{start})");
+            format!(
+                "gte(t,{start})*exp(-(t-{start})*4)*\
+                 (sin(2*{phase})+0.5*sin(4*{phase})+0.3*sin(6*{phase}))"
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("+");
+    let status = std::process::Command::new(&tools.ffmpeg)
+        .args(["-v", "error", "-y", "-f", "lavfi", "-i"])
+        .arg(format!("aevalsrc='0.2*({expression})':s=48000:d=3"))
+        .args(["-c:a", "aac"])
+        .arg(file)
+        .status()
+        .unwrap();
+    assert!(status.success(), "ffmpeg could not make the notes");
+}
+
+#[tokio::test]
+async fn attacks_are_found_where_the_notes_start() {
+    let Some(tools) = tools().await else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let (clip, attacks_file) = (
+        dir.path().join("notes.mp4"),
+        dir.path().join("attacks.json"),
+    );
+    let notes = [(0.5, 440.0), (1.1, 523.25), (1.7, 659.25), (2.3, 392.0)];
+    make_notes(&tools, &clip, &notes);
+
+    FfmpegPreparer::new(tools)
+        .make_attacks(&clip, &attacks_file)
+        .await
+        .unwrap();
+
+    let json: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&attacks_file).unwrap()).unwrap();
+    assert_eq!(json["version"], 1);
+    let times = json["times"].as_array().unwrap();
+    assert_eq!(times.len(), notes.len(), "{json}");
+    for (time, (start, _)) in times.iter().zip(&notes) {
+        let time = time.as_f64().unwrap();
+        assert!((time - start).abs() <= 0.02, "{time} for {start}: {json}");
+    }
+    let strengths = json["strengths"].as_array().unwrap();
+    assert_eq!(strengths.len(), times.len());
+    assert!(
+        strengths
+            .iter()
+            .all(|s| (0.0..=1.0).contains(&s.as_f64().unwrap()))
+    );
+}
+
+#[tokio::test]
+async fn videos_without_audio_have_empty_peaks_and_attacks() {
+    let Some(tools) = tools().await else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let clip = dir.path().join("silent.mp4");
+    let status = std::process::Command::new(&tools.ffmpeg)
+        .args(["-v", "error", "-y", "-f", "lavfi", "-i"])
+        .arg("testsrc2=size=320x240:rate=25:duration=1")
+        .args(["-c:v", "libopenh264"])
+        .arg(&clip)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let preparer = FfmpegPreparer::new(tools);
+    let (peaks_file, attacks_file) = (
+        dir.path().join("peaks.json"),
+        dir.path().join("attacks.json"),
+    );
+
+    preparer.make_peaks(&clip, &peaks_file).await.unwrap();
+    preparer.make_attacks(&clip, &attacks_file).await.unwrap();
+
+    let read = |file: &Path| -> serde_json::Value {
+        serde_json::from_slice(&std::fs::read(file).unwrap()).unwrap()
+    };
+    assert_eq!(read(&peaks_file)["peaks"], serde_json::json!([]));
+    assert_eq!(read(&attacks_file)["times"], serde_json::json!([]));
+}
+
 /// Width and height from a JPEG's start-of-frame marker.
 fn jpeg_size(bytes: &[u8]) -> (u32, u32) {
     let mut i = 2;

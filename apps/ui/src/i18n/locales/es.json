@@ -35,6 +35,15 @@
     "position": "Posición",
     "speed": "Velocidad"
   },
+  "timeline": {
+    "overview": "Canción entera",
+    "detail": "Detalle de la canción: forma de onda, regla y ataques",
+    "follow": {
+      "page": "La línea de tiempo sigue la reproducción por páginas",
+      "continuous": "La línea de tiempo se desplaza con la reproducción",
+      "off": "La línea de tiempo se queda donde la dejas"
+    }
+  },
   "preparation": {
     "queued": "En cola para preparar la navegación instantánea…",
     "running": "Preparando la navegación instantánea… {{percent}} %",
@@ -65,17 +74,24 @@
     "faster": "Más rápido (+5 %)",
     "prevFrame": "Fotograma anterior",
     "nextFrame": "Fotograma siguiente",
+    "prevAttack": "Ataque anterior (nota)",
+    "nextAttack": "Ataque siguiente (nota)",
     "stepBack": "Retroceder 2 segundos",
     "stepForward": "Avanzar 2 segundos",
     "longBack": "Retroceder 10 segundos",
     "longForward": "Avanzar 10 segundos",
     "goToStart": "Ir al principio",
-    "goToEnd": "Ir al final"
+    "goToEnd": "Ir al final",
+    "zoomIn": "Acercar la línea de tiempo",
+    "zoomOut": "Alejar la línea de tiempo",
+    "zoomFit": "Ver la canción entera en la línea de tiempo",
+    "cycleFollow": "Cambiar cómo sigue la línea de tiempo a la reproducción"
   },
   "commandGroups": {
     "general": "General",
     "navigation": "Navegación",
     "playback": "Reproducción",
+    "view": "Vista",
     "loops": "Bucles",
     "markers": "Marcadores"
   },

@@ -12,6 +12,9 @@ import { PreparationStatus } from "@/features/library/preparation-status";
 import { forgetLastVideo, rememberLastVideo } from "./last-video";
 import { playerCommands } from "./player-commands";
 import { PlayerControls } from "./player-controls";
+import { Timeline } from "./timeline/timeline";
+import { TimelineController } from "./timeline/timeline-controller";
+import { useAttacks, useWaveform } from "./use-navigation-data";
 import { useSeamlessSource } from "./use-seamless-source";
 
 /** The study player for one video. */
@@ -37,8 +40,25 @@ export function VideoPlayerPage({ videoId }: { videoId: string }) {
 
   const library = useSystemInfo().data?.library_id;
 
+  // One timeline per video: the page is keyed by the video id.
+  const timeline = useMemo(() => new TimelineController(() => videoRef.current), []);
+  const waveform = useWaveform(video.data);
+  const attacks = useAttacks(video.data);
+  const attackTimes = useRef<readonly number[] | null>(null);
+  useEffect(() => {
+    attackTimes.current = attacks?.times ?? null;
+  }, [attacks]);
+
   const fps = video.data?.fps ?? 30;
-  const commands = useMemo(() => playerCommands(() => videoRef.current, fps), [fps]);
+  const commands = useMemo(
+    () =>
+      playerCommands(
+        () => videoRef.current,
+        fps,
+        () => attackTimes.current,
+      ),
+    [fps],
+  );
   useCommands(commands);
 
   useEffect(() => {
@@ -87,11 +107,20 @@ export function VideoPlayerPage({ videoId }: { videoId: string }) {
           onLoadedMetadata={media.onLoadedMetadata}
           preload="auto"
           playsInline
+          data-testid="player-video"
           className="absolute inset-0 size-full object-contain"
           onClick={() => registry.execute("player.togglePlay")}
         />
       </div>
-      <PlayerControls videoRef={videoRef} fps={fps} />
+      <Timeline
+        video={video.data}
+        videoRef={videoRef}
+        mediaSrc={media.src}
+        timeline={timeline}
+        waveform={waveform}
+        attacks={attacks}
+      />
+      <PlayerControls videoRef={videoRef} timeline={timeline} />
     </div>
   );
 }

@@ -78,6 +78,14 @@ impl MediaPreparer for FakePreparer {
         .unwrap();
         Ok(())
     }
+    async fn make_attacks(&self, _: &Path, target: &Path) -> segno_domain::Result<()> {
+        std::fs::write(
+            target,
+            br#"{"version":1,"times":[0.5,1.25],"strengths":[1.0,0.4]}"#,
+        )
+        .unwrap();
+        Ok(())
+    }
 }
 
 async fn harness_with(probe: Option<Arc<dyn MediaProbe>>, prepare: bool) -> Harness {
@@ -313,6 +321,7 @@ async fn imported_videos_are_prepared_in_the_background() {
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
     assert_eq!(prepared["has_peaks"], true, "{prepared}");
+    assert_eq!(prepared["has_attacks"], true);
     assert_eq!(prepared["thumbnails"]["count"], 142);
     assert_eq!(prepared["thumbnails"]["tile_height"], 90);
     assert!(prepared["preparation_error"].is_null());
@@ -338,17 +347,25 @@ async fn imported_videos_are_prepared_in_the_background() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(peaks["peaks_per_second"], 100);
+    let (status, _, attacks) = send(
+        &h.app,
+        empty(authorized(get(&format!("/videos/{id}/attacks")))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(attacks["times"], json!([0.5, 1.25]));
 }
 
 #[tokio::test]
-async fn unprepared_videos_have_no_thumbnails_or_peaks_yet() {
+async fn unprepared_videos_have_no_navigation_files_yet() {
     let h = harness().await;
     let file = h.library.path().join("clip.mp4");
     std::fs::write(&file, b"x").unwrap();
     let (_, _, video) = send(&h.app, import(&file)).await;
     assert_eq!(video["seek_proxy"], false);
+    assert_eq!(video["has_attacks"], false);
     let id = video["id"].as_str().unwrap();
-    for route in ["thumbnails", "peaks"] {
+    for route in ["thumbnails", "peaks", "attacks"] {
         let uri = format!("/videos/{id}/{route}?token={TOKEN}");
         let (status, _, _) = send(&h.app, empty(get(&uri))).await;
         assert_eq!(status, StatusCode::NOT_FOUND, "{route}");
@@ -368,6 +385,7 @@ fn the_openapi_document_describes_every_route() {
         "/videos/{id}/media",
         "/videos/{id}/thumbnails",
         "/videos/{id}/peaks",
+        "/videos/{id}/attacks",
     ] {
         assert!(paths.contains_key(path), "missing {path}");
     }

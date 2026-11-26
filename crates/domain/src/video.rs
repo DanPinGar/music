@@ -135,12 +135,14 @@ pub struct Video {
     pub status: VideoStatus,
     /// Playable media, relative to the library folder (e.g. `media/<id>/original.mp4`).
     pub media_file: Option<String>,
-    /// Copy of the media re-encoded for instant seeking (keyframe every ~0.5 s).
+    /// Copy of the media re-encoded for instant seeking (frequent keyframes, no B-frames).
     pub proxy_file: Option<String>,
     /// Sprite of one thumbnail per second (see [`crate::ThumbnailSprite`]).
     pub thumbnails_file: Option<String>,
     /// Waveform peaks of the audio, as JSON.
     pub peaks_file: Option<String>,
+    /// Attacks (note onsets) found in the audio, as JSON.
+    pub attacks_file: Option<String>,
     /// Why preparing the media for navigation failed, if it did.
     pub preparation_error: Option<String>,
     pub created_at: DateTime<Utc>,
@@ -154,7 +156,8 @@ impl Video {
             && self.preparation_error.is_none()
             && (self.proxy_file.is_none()
                 || self.thumbnails_file.is_none()
-                || self.peaks_file.is_none())
+                || self.peaks_file.is_none()
+                || self.attacks_file.is_none())
     }
 
     /// Copies the technical facts of the media into the entry.
@@ -192,6 +195,7 @@ impl Video {
             proxy_file: None,
             thumbnails_file: None,
             peaks_file: None,
+            attacks_file: None,
             preparation_error: None,
             created_at: now,
             updated_at: now,

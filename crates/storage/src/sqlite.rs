@@ -69,7 +69,7 @@ impl SqliteStore {
 
 macro_rules! video_columns {
     () => {
-        "id, source, source_url, title, channel, duration_ms, fps, width, height, status, media_file, proxy_file, thumbnails_file, peaks_file, preparation_error, created_at, updated_at"
+        "id, source, source_url, title, channel, duration_ms, fps, width, height, status, media_file, proxy_file, thumbnails_file, peaks_file, attacks_file, preparation_error, created_at, updated_at"
     };
 }
 
@@ -91,6 +91,7 @@ fn bind_fields<'q>(query: SqliteQuery<'q>, video: &'q Video) -> SqliteQuery<'q> 
         .bind(&video.proxy_file)
         .bind(&video.thumbnails_file)
         .bind(&video.peaks_file)
+        .bind(&video.attacks_file)
         .bind(&video.preparation_error)
         .bind(video.created_at)
         .bind(video.updated_at)
@@ -112,6 +113,7 @@ struct VideoRow {
     proxy_file: Option<String>,
     thumbnails_file: Option<String>,
     peaks_file: Option<String>,
+    attacks_file: Option<String>,
     preparation_error: Option<String>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
@@ -136,6 +138,7 @@ impl TryFrom<VideoRow> for Video {
             proxy_file: row.proxy_file,
             thumbnails_file: row.thumbnails_file,
             peaks_file: row.peaks_file,
+            attacks_file: row.attacks_file,
             preparation_error: row.preparation_error,
             created_at: row.created_at,
             updated_at: row.updated_at,
@@ -184,7 +187,7 @@ impl VideoRepository for SqliteStore {
         let query = sqlx::query(concat!(
             "INSERT INTO videos (",
             video_columns!(),
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         ))
         .bind(video.id.to_string());
         bind_fields(query, video)
@@ -198,8 +201,9 @@ impl VideoRepository for SqliteStore {
         let query = sqlx::query(
             "UPDATE videos SET source = ?, source_url = ?, title = ?, channel = ?, \
              duration_ms = ?, fps = ?, width = ?, height = ?, status = ?, media_file = ?, \
-             proxy_file = ?, thumbnails_file = ?, peaks_file = ?, preparation_error = ?, \
-             created_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL",
+             proxy_file = ?, thumbnails_file = ?, peaks_file = ?, attacks_file = ?, \
+             preparation_error = ?, created_at = ?, updated_at = ? \
+             WHERE id = ? AND deleted_at IS NULL",
         );
         let result = bind_fields(query, video)
             .bind(video.id.to_string())
@@ -287,6 +291,7 @@ mod tests {
         video.proxy_file = Some(format!("media/{}/proxy.mp4", video.id));
         video.thumbnails_file = Some(format!("media/{}/thumbnails.jpg", video.id));
         video.peaks_file = Some(format!("media/{}/peaks.json", video.id));
+        video.attacks_file = Some(format!("media/{}/attacks.json", video.id));
         video.preparation_error = Some("no encoder".into());
         video.status = VideoStatus::Ready;
         store.update(&video).await.unwrap();

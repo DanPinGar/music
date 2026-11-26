@@ -52,15 +52,18 @@ pub async fn import_local_video(
 /// The steps of preparing a video for navigation, in the order they run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PreparationStage {
+    Peaks,
+    Attacks,
     SeekProxy,
     Thumbnails,
-    Peaks,
 }
 
-/// Prepares a video's media for instant navigation: the seek proxy first, then the thumbnails
-/// (drawn from the proxy's keyframes) and the waveform peaks. Each result is saved as soon as
-/// it exists, so an interruption keeps the finished parts, and parts already made are skipped.
-/// A failure is recorded on the video (`preparation_error`) before being returned.
+/// Prepares a video's media for instant navigation. The audio parts come first because they
+/// take seconds: the waveform peaks and the attacks. Then the seek proxy, which takes most of
+/// the time, and the thumbnails drawn from its keyframes. Each result is saved as soon as it
+/// exists, so the timeline can use it straight away and an interruption keeps the finished
+/// parts; parts already made are skipped. A failure is recorded on the video
+/// (`preparation_error`) before being returned.
 pub async fn prepare_video(
     videos: &dyn VideoRepository,
     store: &dyn MediaStore,
@@ -100,6 +103,22 @@ async fn prepare_missing_parts(
         height: video.height.unwrap_or(0),
     };
 
+    if video.peaks_file.is_none() {
+        let (relative, path) = store.derived(video.id, "peaks.json").await?;
+        progress(PreparationStage::Peaks, 0.0);
+        preparer.make_peaks(&original, &path).await?;
+        video.peaks_file = Some(relative);
+        save(video, videos).await?;
+    }
+
+    if video.attacks_file.is_none() {
+        let (relative, path) = store.derived(video.id, "attacks.json").await?;
+        progress(PreparationStage::Attacks, 0.0);
+        preparer.make_attacks(&original, &path).await?;
+        video.attacks_file = Some(relative);
+        save(video, videos).await?;
+    }
+
     let proxy = match &video.proxy_file {
         Some(relative) => store.resolve(relative)?,
         None => {
@@ -122,14 +141,6 @@ async fn prepare_missing_parts(
         let sprite = ThumbnailSprite::for_video(input.duration_ms, input.width, input.height);
         preparer.make_thumbnails(&proxy, &path, sprite).await?;
         video.thumbnails_file = Some(relative);
-        save(video, videos).await?;
-    }
-
-    if video.peaks_file.is_none() {
-        let (relative, path) = store.derived(video.id, "peaks.json").await?;
-        progress(PreparationStage::Peaks, 0.0);
-        preparer.make_peaks(&original, &path).await?;
-        video.peaks_file = Some(relative);
         save(video, videos).await?;
     }
     Ok(())
@@ -367,6 +378,14 @@ mod tests {
             self.made.lock().unwrap().push(target.display().to_string());
             Ok(())
         }
+        async fn make_attacks(&self, source: &Path, target: &Path) -> Result<()> {
+            assert!(
+                source.ends_with("original.mp4"),
+                "attacks come from the original"
+            );
+            self.made.lock().unwrap().push(target.display().to_string());
+            Ok(())
+        }
     }
 
     async fn imported(videos: &Videos) -> Video {
@@ -414,15 +433,17 @@ mod tests {
                 .ends_with("thumbnails.jpg")
         );
         assert!(prepared.peaks_file.unwrap().ends_with("peaks.json"));
-        assert_eq!(preparer.made.lock().unwrap().len(), 3);
+        assert!(prepared.attacks_file.unwrap().ends_with("attacks.json"));
+        assert_eq!(preparer.made.lock().unwrap().len(), 4);
         assert_eq!(preparer.sprite.lock().unwrap().unwrap().count, 142);
         assert_eq!(
             *stages.lock().unwrap(),
             [
+                (PreparationStage::Peaks, 0.0),
+                (PreparationStage::Attacks, 0.0),
                 (PreparationStage::SeekProxy, 0.0),
                 (PreparationStage::SeekProxy, 0.5),
                 (PreparationStage::Thumbnails, 0.0),
-                (PreparationStage::Peaks, 0.0),
             ]
         );
         assert!(!videos.get(video.id).await.unwrap().needs_preparation());
@@ -441,8 +462,32 @@ mod tests {
             .unwrap();
 
         let made = preparer.made.lock().unwrap();
-        assert_eq!(made.len(), 2);
+        assert_eq!(made.len(), 3);
         assert!(!made.iter().any(|path| path.ends_with("proxy.mp4")));
+    }
+
+    #[tokio::test]
+    async fn videos_prepared_before_attacks_existed_only_get_their_attacks() {
+        let videos = Videos::default();
+        let mut video = imported(&videos).await;
+        for (file, name) in [
+            (&mut video.proxy_file, "proxy.mp4"),
+            (&mut video.thumbnails_file, "thumbnails.jpg"),
+            (&mut video.peaks_file, "peaks.json"),
+        ] {
+            *file = Some(format!("media/{}/{name}", video.id));
+        }
+        videos.update(&video).await.unwrap();
+        assert!(video.needs_preparation());
+        let preparer = Preparer::default();
+
+        prepare_video(&videos, &Store::default(), &preparer, video.id, &|_, _| {})
+            .await
+            .unwrap();
+
+        let made = preparer.made.lock().unwrap();
+        assert_eq!(made.len(), 1);
+        assert!(made[0].ends_with("attacks.json"));
     }
 
     #[tokio::test]

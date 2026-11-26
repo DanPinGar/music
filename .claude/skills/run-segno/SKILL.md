@@ -43,17 +43,24 @@ node .claude/skills/run-segno/driver.mjs --smoke        # dev mode: Vite + cargo
 node .claude/skills/run-segno/driver.mjs --smoke prod   # built app: real CSP and origin, ~25 s
 ```
 
-It prints `PASS`/`FAIL` for 20 checks:
+It prints `PASS`/`FAIL` for 26 checks:
 
 - the status bar fed by the API, the `Ctrl+K` palette running a command, the `?` dialog,
   `Ctrl+2`/`Ctrl+1` and the language toggle;
-- `GET /videos` with the session token and importing a 5-second 60 fps clip made with ffmpeg;
-- the core preparing it in the background (seek proxy, thumbnail sprite and waveform peaks) and
-  serving the thumbnails and peaks;
+- `GET /videos` with the session token and importing a 5-second 60 fps clip made with ffmpeg,
+  with a plucked note every half second from 0.5 s to 4.5 s;
+- the core preparing it in the background (waveform peaks, attacks, seek proxy, thumbnail
+  sprite) and serving the thumbnails and peaks;
 - the player switching to the seek proxy and loading it;
 - `Space` playing and pausing, `.` stepping exactly one frame, `→` jumping 2 s and `-` slowing
   to 95 %;
+- the timeline: waveform drawn and 9 attacks for the 9 notes, `Shift+→`/`Shift+←` landing on
+  the notes, a click on the overview jumping there, `Ctrl` + wheel zooming and `Ctrl+0` showing
+  the whole clip, and the hover preview showing the exact frame;
 - no console errors or HTTP errors.
+
+The timeline's detail canvas exposes its state for tests: `data-start`, `data-span`,
+`data-follow`, `data-waveform` (`ready` or `none`) and `data-attacks` (how many).
 
 It saves screenshots, closes the app and exits 0 only if everything passed.
 
@@ -105,6 +112,7 @@ and the production build's output to `target/run-segno/build.log`.
 | `press <key>` | one key press, with Playwright names: `Space`, `Control+k`, `?`, `.`, `ArrowRight`, `Home` |
 | `type <text>` | type into the focused element |
 | `click <css>` / `click-text <text>` | click through the DOM (buttons, links, palette items) |
+| `move <css> [fx] [fy]` | move the mouse over an element, at fractions of its size (default the centre), e.g. `move [data-testid=timeline-detail] 0.7 0.5` to hover the timeline |
 | `wait <css>` | wait up to 10 s for an element |
 | `text [css]` | visible text of an element, or of the whole page; the player's clock is `[data-testid=player-time]` |
 | `eval <js>` | evaluate an expression in the page and print it as JSON |
@@ -127,7 +135,7 @@ token `dev`. The clip below is the one `import test-clip` or `--smoke` makes.
 cargo build -p segno-api
 ./target/debug/segno-api.exe serve --library target/run-segno/api-library &
 curl -s --retry 30 --retry-connrefused --retry-delay 1 http://127.0.0.1:7700/health
-curl -s -H "Authorization: Bearer dev" -H "Content-Type: application/json" -d "{\"path\": \"$(pwd -W)/target/run-segno/test-clip.mp4\"}" http://127.0.0.1:7700/videos/import
+curl -s -H "Authorization: Bearer dev" -H "Content-Type: application/json" -d "{\"path\": \"$(pwd -W)/target/run-segno/test-clip-v2.mp4\"}" http://127.0.0.1:7700/videos/import
 curl -s -H "Authorization: Bearer dev" http://127.0.0.1:7700/videos
 kill %1
 ```
@@ -150,8 +158,8 @@ pnpm dev   # builds and opens the window with hot reload; closing the window sto
 pnpm check
 ```
 
-Biome, both type checks, Vitest (31 tests), the UI build, rustfmt, clippy with warnings as
-errors, cargo test (59 tests, including real ffmpeg runs), Ruff, Pyright in strict mode and
+Biome, both type checks, Vitest (60 tests), the UI build, rustfmt, clippy with warnings as
+errors, cargo test (66 tests, including real ffmpeg runs), Ruff, Pyright in strict mode and
 pytest (7 tests). All pass. Set `SEGNO_REQUIRE_FFMPEG=1` to make the ffmpeg tests fail, instead
 of skipping, when `.tools/ffmpeg` is missing (CI does).
 
@@ -179,9 +187,16 @@ of skipping, when `.tools/ffmpeg` is missing (CI does).
   sleeping a fixed time.
 - **Seeking cancels the video's in-flight range requests** (`net::ERR_ABORTED`). That is normal;
   the driver ignores it for media requests and reports every other failed request.
-- **`bench` varies between runs.** Frame steps on the same file measured a worst case of 52 ms in
-  one session and 30 ms in another. Run it at least twice before drawing conclusions, and compare
-  files in the same session (`bench` then `bench original`).
+- **`bench` varies between runs, and the first run after a preparation is the slowest.** Jumps on
+  the same proxy measured a p95 of 47 ms in the first run and 26 ms in the next. Run it at least
+  twice before drawing conclusions, and compare files in the same session (`bench` then
+  `bench original`).
+- **The player page has two `<video>` elements**: the player and the hidden one behind the
+  timeline's exact-frame preview. Select the player with `[data-testid=player-video]`, never
+  with a bare `video`.
+- **Zoom and follow mode outlive the test library.** The timeline keeps them in `localStorage`
+  (`segno.timeline`), which `launch` does not wipe, so a new session may open zoomed in. Press
+  `Control+0` first when a check depends on the zoom.
 - **Right after an import, `/media` serves the original.** The player switches to the proxy when
   the preparation finishes (its URL gains `copy=seek-proxy`), keeping the position, speed and play
   state. Anything that measures or screenshots playback should wait for that, as `bench` does.

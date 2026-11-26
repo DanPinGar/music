@@ -20,12 +20,13 @@ impl Progress {
         done: 0.0,
     };
 
-    /// The seek proxy is most of the work; thumbnails and peaks take seconds.
+    /// The seek proxy is most of the work; the other steps take a second or two.
     fn of(stage: PreparationStage, stage_done: f64) -> Self {
         let (start, weight) = match stage {
-            PreparationStage::SeekProxy => (0.0, 0.9),
-            PreparationStage::Thumbnails => (0.9, 0.05),
-            PreparationStage::Peaks => (0.95, 0.05),
+            PreparationStage::Peaks => (0.0, 0.03),
+            PreparationStage::Attacks => (0.03, 0.04),
+            PreparationStage::SeekProxy => (0.07, 0.9),
+            PreparationStage::Thumbnails => (0.97, 0.03),
         };
         Self {
             stage: Some(stage),
@@ -110,9 +111,10 @@ mod tests {
 
     #[test]
     fn overall_progress_weighs_the_proxy_most() {
-        assert_eq!(Progress::of(PreparationStage::SeekProxy, 0.5).done, 0.45);
-        assert_eq!(Progress::of(PreparationStage::Thumbnails, 0.0).done, 0.9);
-        assert!((Progress::of(PreparationStage::Peaks, 1.0).done - 1.0).abs() < 1e-9);
-        assert_eq!(Progress::of(PreparationStage::SeekProxy, 7.0).done, 0.9);
+        assert_eq!(Progress::of(PreparationStage::Peaks, 0.0).done, 0.0);
+        assert_eq!(Progress::of(PreparationStage::SeekProxy, 0.0).done, 0.07);
+        assert!((Progress::of(PreparationStage::SeekProxy, 0.5).done - 0.52).abs() < 1e-9);
+        assert!((Progress::of(PreparationStage::Thumbnails, 1.0).done - 1.0).abs() < 1e-9);
+        assert!((Progress::of(PreparationStage::SeekProxy, 7.0).done - 0.97).abs() < 1e-9);
     }
 }

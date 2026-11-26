@@ -92,6 +92,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/videos/{id}/attacks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The attacks (note onsets) found in the audio, for stepping from note to note. */
+        get: operations["get_attacks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/videos/{id}/media": {
         parameters: {
             query?: never;
@@ -120,10 +137,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * The audio waveform: `{"version": 1, "peaks_per_second": 100, "peaks": [min, max, …]}` with
-         *     values from -127 to 127.
-         */
+        /** The audio waveform: a minimum and a maximum per slot of audio. */
         get: operations["get_peaks"];
         put?: never;
         post?: never;
@@ -154,6 +168,15 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description The attacks (note onsets) found in a video's audio, served by `/attacks`. */
+        AttacksDto: {
+            /** @description How strong each attack is, from 0 to 1 (1 for the strong attacks of the video). */
+            strengths: number[];
+            /** @description When each attack happens, in seconds, in order. */
+            times: number[];
+            /** Format: int32 */
+            version: number;
+        };
         /** @description Result of the liveness probe. */
         Health: {
             /** @description Always `ok` while the API is serving. */
@@ -166,6 +189,18 @@ export interface components {
             /** @description Title in the library; the file name when omitted. */
             title?: string | null;
         };
+        /** @description The audio waveform of a video, served by `/peaks`. */
+        PeaksDto: {
+            /** @description A minimum and a maximum per slot, in turn, from -127 to 127. */
+            peaks: number[];
+            /**
+             * Format: int32
+             * @description Pairs per second of audio.
+             */
+            peaks_per_second: number;
+            /** Format: int32 */
+            version: number;
+        };
         /** @description Progress of preparing a video for navigation. */
         PreparationDto: {
             /**
@@ -175,8 +210,12 @@ export interface components {
             progress: number;
             stage: components["schemas"]["PreparationStageDto"];
         };
-        /** @enum {string} */
-        PreparationStageDto: "queued" | "seek_proxy" | "thumbnails" | "peaks";
+        /**
+         * @description The step running, in order: waiting, the waveform peaks, the attacks, the seek proxy and
+         *     the thumbnails.
+         * @enum {string}
+         */
+        PreparationStageDto: "queued" | "peaks" | "attacks" | "seek_proxy" | "thumbnails";
         /** @description RFC 9457 problem details (`application/problem+json`). */
         Problem: {
             /** @description Explanation specific to this occurrence. */
@@ -234,6 +273,8 @@ export interface components {
             duration_ms?: number | null;
             /** Format: double */
             fps?: number | null;
+            /** @description Whether `/attacks` serves the attacks (note onsets) found in the audio. */
+            has_attacks: boolean;
             /** @description Whether `/peaks` serves the audio waveform. */
             has_peaks: boolean;
             /** Format: int32 */
@@ -445,6 +486,47 @@ export interface operations {
             };
         };
     };
+    get_attacks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Video id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The attacks */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttacksDto"];
+                };
+            };
+            /** @description Missing or invalid token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description No such video, or no attacks yet */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     get_media: {
         parameters: {
             query?: never;
@@ -503,12 +585,14 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The waveform peaks, as JSON */
+            /** @description The waveform peaks */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["PeaksDto"];
+                };
             };
             /** @description Missing or invalid token */
             401: {

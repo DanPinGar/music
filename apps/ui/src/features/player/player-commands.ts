@@ -1,4 +1,5 @@
 import type { Command } from "@/commands/registry";
+import { nextAttack, previousAttack } from "./attacks";
 import {
   clampTime,
   frameStep,
@@ -9,9 +10,17 @@ import {
   STEP_SECONDS,
 } from "./navigation";
 
-/** The player's commands, acting on whatever video element `video()` returns. */
-export function playerCommands(video: () => HTMLVideoElement | null, fps: number): Command[] {
+/**
+ * The player's commands, acting on whatever video element `video()` returns. `attacks()`
+ * gives the times of the attacks (note onsets) once the core has found them.
+ */
+export function playerCommands(
+  video: () => HTMLVideoElement | null,
+  fps: number,
+  attacks: () => readonly number[] | null = () => null,
+): Command[] {
   const enabled = () => video() !== null;
+  const hasAttacks = () => enabled() && (attacks()?.length ?? 0) > 0;
   const withVideo = (action: (element: HTMLVideoElement) => void) => () => {
     const element = video();
     if (element) action(element);
@@ -86,6 +95,28 @@ export function playerCommands(video: () => HTMLVideoElement | null, fps: number
       keys: ["."],
       enabled,
       run: stepFrames(1),
+    },
+    {
+      id: "player.prevAttack",
+      title: "commands.prevAttack",
+      group: "navigation",
+      keys: ["Shift+ArrowLeft"],
+      enabled: hasAttacks,
+      run: withVideo((element) => {
+        const time = previousAttack(attacks() ?? [], element.currentTime, !element.paused);
+        if (time !== undefined) seekTo(element, time);
+      }),
+    },
+    {
+      id: "player.nextAttack",
+      title: "commands.nextAttack",
+      group: "navigation",
+      keys: ["Shift+ArrowRight"],
+      enabled: hasAttacks,
+      run: withVideo((element) => {
+        const time = nextAttack(attacks() ?? [], element.currentTime);
+        if (time !== undefined) seekTo(element, time);
+      }),
     },
     {
       id: "player.stepBack",

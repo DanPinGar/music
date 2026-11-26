@@ -226,6 +226,64 @@
         ]
       }
     },
+    "/videos/{id}/attacks": {
+      "get": {
+        "tags": [
+          "videos"
+        ],
+        "summary": "The attacks (note onsets) found in the audio, for stepping from note to note.",
+        "operationId": "get_attacks",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Video id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The attacks",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttacksDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such video, or no attacks yet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "token": []
+          }
+        ]
+      }
+    },
     "/videos/{id}/media": {
       "get": {
         "tags": [
@@ -285,7 +343,7 @@
         "tags": [
           "videos"
         ],
-        "summary": "The audio waveform: `{\"version\": 1, \"peaks_per_second\": 100, \"peaks\": [min, max, …]}` with\nvalues from -127 to 127.",
+        "summary": "The audio waveform: a minimum and a maximum per slot of audio.",
         "operationId": "get_peaks",
         "parameters": [
           {
@@ -301,7 +359,14 @@
         ],
         "responses": {
           "200": {
-            "description": "The waveform peaks, as JSON"
+            "description": "The waveform peaks",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PeaksDto"
+                }
+              }
+            }
           },
           "401": {
             "description": "Missing or invalid token",
@@ -385,6 +450,38 @@
   },
   "components": {
     "schemas": {
+      "AttacksDto": {
+        "type": "object",
+        "description": "The attacks (note onsets) found in a video's audio, served by `/attacks`.",
+        "required": [
+          "version",
+          "times",
+          "strengths"
+        ],
+        "properties": {
+          "strengths": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "float"
+            },
+            "description": "How strong each attack is, from 0 to 1 (1 for the strong attacks of the video)."
+          },
+          "times": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            },
+            "description": "When each attack happens, in seconds, in order."
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
       "Health": {
         "type": "object",
         "description": "Result of the liveness probe.",
@@ -418,6 +515,36 @@
           }
         }
       },
+      "PeaksDto": {
+        "type": "object",
+        "description": "The audio waveform of a video, served by `/peaks`.",
+        "required": [
+          "version",
+          "peaks_per_second",
+          "peaks"
+        ],
+        "properties": {
+          "peaks": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "description": "A minimum and a maximum per slot, in turn, from -127 to 127."
+          },
+          "peaks_per_second": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Pairs per second of audio.",
+            "minimum": 0
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
       "PreparationDto": {
         "type": "object",
         "description": "Progress of preparing a video for navigation.",
@@ -438,11 +565,13 @@
       },
       "PreparationStageDto": {
         "type": "string",
+        "description": "The step running, in order: waiting, the waveform peaks, the attacks, the seek proxy and\nthe thumbnails.",
         "enum": [
           "queued",
+          "peaks",
+          "attacks",
           "seek_proxy",
-          "thumbnails",
-          "peaks"
+          "thumbnails"
         ]
       },
       "Problem": {
@@ -569,6 +698,7 @@
           "status",
           "seek_proxy",
           "has_peaks",
+          "has_attacks",
           "created_at",
           "updated_at"
         ],
@@ -596,6 +726,10 @@
               "null"
             ],
             "format": "double"
+          },
+          "has_attacks": {
+            "type": "boolean",
+            "description": "Whether `/attacks` serves the attacks (note onsets) found in the audio."
           },
           "has_peaks": {
             "type": "boolean",

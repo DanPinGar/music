@@ -34,7 +34,10 @@ const DESKTOP_EXE = path.join(ROOT, "target", "debug", "segno-desktop.exe");
 // never touch the user's own library.
 const TEST_LIBRARY = path.join(OUT_DIR, "library");
 const FFMPEG = path.join(ROOT, ".tools", "ffmpeg", "bin", "ffmpeg.exe");
-const TEST_CLIP = path.join(OUT_DIR, "test-clip.mp4");
+// The name changes with the recipe, so an old cached clip is never reused.
+const TEST_CLIP = path.join(OUT_DIR, "test-clip-v2.mp4");
+/** When the test clip's notes start: every half second. */
+const TEST_NOTES = [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5];
 // The first `pnpm dev` compiles the whole Rust workspace (about 4 minutes on a laptop).
 const LAUNCH_TIMEOUT_MS = 10 * 60_000;
 const APP_PAGE = /localhost:5173|tauri\.localhost/;
@@ -270,16 +273,23 @@ async function apiConfig() {
   return need().evaluate(() => window.__TAURI_INTERNALS__.invoke("api_config"));
 }
 
-/** A 5-second 1280×720 clip at 60 fps with a 440 Hz tone, made once with the repo's ffmpeg. */
+/**
+ * A 5-second 1280×720 clip at 60 fps with a plucked note every half second (`TEST_NOTES`),
+ * made once with the repo's ffmpeg.
+ */
 function makeTestClip() {
   if (fs.existsSync(TEST_CLIP)) return TEST_CLIP;
   if (!fs.existsSync(FFMPEG)) throw new Error("ffmpeg is missing: run `pnpm tools`");
+  const notes = TEST_NOTES.map((start, index) => {
+    const phase = `PI*${440 + 55 * index}*(t-${start})`;
+    return `gte(t,${start})*exp(-(t-${start})*6)*(sin(2*${phase})+0.5*sin(4*${phase}))`;
+  }).join("+");
   const result = spawnSync(
     FFMPEG,
     [
       ...["-v", "error", "-y"],
       ...["-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=60:duration=5"],
-      ...["-f", "lavfi", "-i", "sine=frequency=440:duration=5"],
+      ...["-f", "lavfi", "-i", `aevalsrc='0.3*(${notes})':s=48000:d=5`],
       ...["-c:v", "libopenh264", "-c:a", "aac", "-shortest", TEST_CLIP],
     ],
     { encoding: "utf8", windowsHide: true },
@@ -291,7 +301,7 @@ function makeTestClip() {
 /** State of the player's video element. */
 function videoState(app) {
   return app.evaluate(() => {
-    const video = document.querySelector("video");
+    const video = document.querySelector("[data-testid=player-video]");
     return video
       ? {
           time: video.currentTime,
@@ -349,7 +359,7 @@ function serveFile(file) {
 /** Points the player's video at `url` until it can play through; returns the previous source. */
 function swapSource(app, url) {
   return app.evaluate(async (source) => {
-    const video = document.querySelector("video");
+    const video = document.querySelector("[data-testid=player-video]");
     const previous = video.currentSrc;
     const ready = new Promise((resolve) =>
       video.addEventListener("canplaythrough", resolve, { once: true }),
@@ -406,7 +416,7 @@ async function waitForPreparation(id, timeoutMs) {
  */
 function bench(app, fps) {
   return app.evaluate(async (framesPerSecond) => {
-    const video = document.querySelector("video");
+    const video = document.querySelector("[data-testid=player-video]");
     const seeked = () =>
       new Promise((resolve) => video.addEventListener("seeked", resolve, { once: true }));
     const timed = async (time) => {
@@ -566,7 +576,10 @@ async function smoke() {
     );
     const switched = await app
       .waitForFunction(
-        () => document.querySelector("video")?.currentSrc.includes("copy=seek-proxy") === true,
+        () =>
+          document
+            .querySelector("[data-testid=player-video]")
+            ?.currentSrc.includes("copy=seek-proxy") === true,
         null,
         { timeout: 10_000 },
       )
@@ -578,9 +591,13 @@ async function smoke() {
     const loaded = await app
       // HAVE_ENOUGH_DATA: playable through. With only the first frame (2), the first play
       // stalls for a moment while the decoder starts.
-      .waitForFunction(() => (document.querySelector("video")?.readyState ?? 0) >= 4, null, {
-        timeout: 15_000,
-      })
+      .waitForFunction(
+        () => (document.querySelector("[data-testid=player-video]")?.readyState ?? 0) >= 4,
+        null,
+        {
+          timeout: 15_000,
+        },
+      )
       .then(
         () => true,
         () => false,
@@ -597,7 +614,7 @@ async function smoke() {
     const playing = await app
       .waitForFunction(
         () => {
-          const video = document.querySelector("video");
+          const video = document.querySelector("[data-testid=player-video]");
           return video !== null && !video.paused && video.currentTime > 0.3;
         },
         null,
@@ -636,7 +653,86 @@ async function smoke() {
     now = await videoState(app);
     check('"-" slows down to 95 %', now?.rate === 0.95, `rate = ${now?.rate}`);
     await app.keyboard.press("+");
+
+    // The timeline: waveform and attacks, stepping by attack, jumps, zoom and the preview.
+    const detail = app.locator("[data-testid=timeline-detail]");
+    const overview = app.locator("[data-testid=timeline-overview]");
+    const drawn = await app
+      .waitForFunction(
+        () => {
+          const canvas = document.querySelector("[data-testid=timeline-detail]");
+          return canvas?.getAttribute("data-waveform") === "ready" &&
+            Number(canvas.getAttribute("data-attacks")) > 0
+            ? canvas.getAttribute("data-attacks")
+            : null;
+        },
+        null,
+        { timeout: 10_000 },
+      )
+      .then(
+        (handle) => handle.jsonValue(),
+        () => null,
+      );
+    check(
+      "the timeline draws the waveform and the attacks found in the audio",
+      Number(drawn) === TEST_NOTES.length,
+      `${drawn ?? 0} attacks for ${TEST_NOTES.length} notes`,
+    );
+
+    await app.keyboard.press("Home");
+    await app.keyboard.press("Shift+ArrowRight");
+    await app.keyboard.press("Shift+ArrowRight");
+    await sleep(200);
+    const second = (await videoState(app))?.time ?? 0;
+    await app.keyboard.press("Shift+ArrowLeft");
+    await sleep(200);
+    const first = (await videoState(app))?.time ?? 0;
+    check(
+      '"Shift+→" and "Shift+←" step from attack to attack',
+      Math.abs(second - TEST_NOTES[1]) <= 0.02 && Math.abs(first - TEST_NOTES[0]) <= 0.02,
+      `t = ${second.toFixed(3)}, then ${first.toFixed(3)}`,
+    );
+
+    const box = await overview.boundingBox();
+    if (box) await app.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    await sleep(200);
+    now = await videoState(app);
+    check(
+      "a click on the overview jumps there",
+      Math.abs((now?.time ?? 0) - (now?.duration ?? 0) / 2) < 0.1,
+      `t = ${now?.time.toFixed(3)}`,
+    );
+
+    const area = await detail.boundingBox();
+    const span = async () => Number(await detail.getAttribute("data-span"));
+    const before = await span();
+    if (area) {
+      await app.mouse.move(area.x + area.width * 0.3, area.y + area.height / 2);
+      await app.keyboard.down("Control");
+      await app.mouse.wheel(0, -300);
+      await app.keyboard.up("Control");
+    }
+    await sleep(200);
+    const zoomed = await span();
+    await app.keyboard.press("Control+0");
+    await sleep(100);
+    const fitted = await span();
+    check(
+      "Ctrl + wheel zooms the detail view and Ctrl+0 shows the whole song",
+      zoomed < before && Math.abs(fitted - (now?.duration ?? 0)) < 0.1,
+      `${before} s -> ${zoomed} s -> ${fitted} s`,
+    );
+
+    if (area) await app.mouse.move(area.x + area.width * 0.7, area.y + area.height / 2);
+    const exact = await app
+      .waitForSelector("[data-testid=timeline-preview][data-exact=true]", { timeout: 5_000 })
+      .then(
+        () => true,
+        () => false,
+      );
+    check("hovering the detail view previews the exact frame", exact);
     await COMMANDS.ss("smoke-4-player");
+    await app.mouse.move(0, 0);
   }
   check(
     "no console errors, warnings or failed requests",
@@ -687,6 +783,14 @@ const COMMANDS = {
       return `OK (${element.tagName.toLowerCase()})`;
     }, text);
     log(`click-text ${JSON.stringify(text)} -> ${result}`);
+  },
+  /** Moves the mouse over an element, at fractions of its width and height (default: centre). */
+  async move(args) {
+    const [selector, fx = "0.5", fy = "0.5"] = args.split(" ");
+    const box = await need().locator(selector).boundingBox();
+    if (!box) throw new Error(`${selector} is not visible`);
+    await need().mouse.move(box.x + box.width * Number(fx), box.y + box.height * Number(fy));
+    log(`mouse over ${selector} at ${fx}, ${fy}`);
   },
   async wait(selector) {
     await need().waitForSelector(selector, { timeout: 10_000 });
@@ -761,12 +865,17 @@ const COMMANDS = {
     }
     if (mode !== "now" && video?.seek_proxy) {
       await need().waitForFunction(
-        () => document.querySelector("video")?.currentSrc.includes("copy=seek-proxy") === true,
+        () =>
+          document
+            .querySelector("[data-testid=player-video]")
+            ?.currentSrc.includes("copy=seek-proxy") === true,
         null,
         { timeout: 10_000 },
       );
     }
-    await need().waitForFunction(() => (document.querySelector("video")?.readyState ?? 0) >= 4);
+    await need().waitForFunction(
+      () => (document.querySelector("[data-testid=player-video]")?.readyState ?? 0) >= 4,
+    );
     log(JSON.stringify(await bench(need(), video?.fps ?? 30)));
   },
   cleanup() {

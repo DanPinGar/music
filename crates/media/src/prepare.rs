@@ -8,6 +8,7 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::sync::Mutex;
 
 use crate::MediaTools;
+use crate::onsets::{self, Onset, OnsetDetector};
 use crate::tools::command;
 
 /// Most frames between two keyframes of the seek proxy. A seek decodes from the keyframe
@@ -236,19 +237,29 @@ impl MediaPreparer for FfmpegPreparer {
         } else {
             Vec::new()
         };
-        let json = serde_json::to_vec(&Peaks {
-            version: 1,
-            peaks_per_second: PEAKS_PER_SECOND,
-            peaks,
-        })
-        .map_err(DomainError::storage)?;
-        let part = part_path(target);
-        tokio::fs::write(&part, json)
-            .await
-            .map_err(DomainError::storage)?;
-        tokio::fs::rename(&part, target)
-            .await
-            .map_err(DomainError::storage)
+        write_json(
+            target,
+            &Peaks {
+                version: 1,
+                peaks_per_second: PEAKS_PER_SECOND,
+                peaks,
+            },
+        )
+        .await
+    }
+
+    async fn make_attacks(&self, source: &Path, target: &Path) -> Result<()> {
+        let onsets = if self.has_audio(source).await {
+            let mut detector = OnsetDetector::new();
+            decode_audio(&self.tools.ffmpeg, source, onsets::SAMPLE_RATE, |samples| {
+                detector.push(samples);
+            })
+            .await?;
+            detector.finish()
+        } else {
+            Vec::new()
+        };
+        write_json(target, &Attacks::from(onsets.as_slice())).await
     }
 }
 
@@ -258,6 +269,43 @@ struct Peaks {
     version: u32,
     peaks_per_second: u32,
     peaks: Vec<i8>,
+}
+
+/// Attacks file: `times` in seconds (to the millisecond), in order, and the `strengths` of the
+/// same attacks, from 0 to 1.
+#[derive(Serialize)]
+struct Attacks {
+    version: u32,
+    times: Vec<f64>,
+    strengths: Vec<f32>,
+}
+
+impl From<&[Onset]> for Attacks {
+    fn from(onsets: &[Onset]) -> Self {
+        Self {
+            version: 1,
+            times: onsets
+                .iter()
+                .map(|onset| (onset.seconds * 1000.0).round() / 1000.0)
+                .collect(),
+            strengths: onsets
+                .iter()
+                .map(|onset| (onset.strength * 100.0).round() / 100.0)
+                .collect(),
+        }
+    }
+}
+
+/// Writes `value` as JSON to `target` atomically (through a part file).
+async fn write_json(target: &Path, value: &impl Serialize) -> Result<()> {
+    let json = serde_json::to_vec(value).map_err(DomainError::storage)?;
+    let part = part_path(target);
+    tokio::fs::write(&part, json)
+        .await
+        .map_err(DomainError::storage)?;
+    tokio::fs::rename(&part, target)
+        .await
+        .map_err(DomainError::storage)
 }
 
 /// Frames between keyframes in the seek proxy (the encoder's `-g`): at most
@@ -320,21 +368,48 @@ async fn run_ffmpeg(
 
 /// Decodes the audio as mono 8 kHz floats and keeps the minimum and maximum of each slot.
 async fn decode_peaks(ffmpeg: &Path, source: &Path) -> Result<Vec<i8>> {
+    let slot = (PEAKS_SAMPLE_RATE / PEAKS_PER_SECOND) as usize;
+    let mut peaks = Vec::new();
+    let (mut low, mut high, mut filled) = (0.0f32, 0.0f32, 0usize);
+    decode_audio(ffmpeg, source, PEAKS_SAMPLE_RATE, |samples| {
+        for &sample in samples {
+            low = low.min(sample);
+            high = high.max(sample);
+            filled += 1;
+            if filled == slot {
+                peaks.extend([quantize(low), quantize(high)]);
+                (low, high, filled) = (0.0, 0.0, 0);
+            }
+        }
+    })
+    .await?;
+    if filled > 0 {
+        peaks.extend([quantize(low), quantize(high)]);
+    }
+    Ok(peaks)
+}
+
+/// Decodes the audio of `source` as mono `f32` samples at `sample_rate` and hands them to
+/// `consume` in chunks as they arrive, so long recordings never sit whole in memory.
+async fn decode_audio(
+    ffmpeg: &Path,
+    source: &Path,
+    sample_rate: u32,
+    mut consume: impl FnMut(&[f32]),
+) -> Result<()> {
     let mut child = command(ffmpeg)
         .args(["-v", "error", "-i"])
         .arg(source)
         .args(["-vn", "-ac", "1", "-ar"])
-        .arg(PEAKS_SAMPLE_RATE.to_string())
+        .arg(sample_rate.to_string())
         .args(["-f", "f32le", "pipe:1"])
         .spawn()
         .map_err(|err| DomainError::Unavailable(format!("ffmpeg could not start: {err}")))?;
     let mut stdout = child.stdout.take().expect("stdout is piped");
 
-    let slot = (PEAKS_SAMPLE_RATE / PEAKS_PER_SECOND) as usize;
-    let mut peaks = Vec::new();
-    let (mut low, mut high, mut filled) = (0.0f32, 0.0f32, 0usize);
     let mut buffer = vec![0u8; 64 * 1024];
     let mut carry: Vec<u8> = Vec::new();
+    let mut samples: Vec<f32> = Vec::new();
     loop {
         let read = stdout
             .read(&mut buffer)
@@ -344,22 +419,12 @@ async fn decode_peaks(ffmpeg: &Path, source: &Path) -> Result<Vec<i8>> {
             break;
         }
         carry.extend_from_slice(&buffer[..read]);
-        let (samples, _) = carry.as_chunks::<4>();
-        let whole = samples.len() * 4;
-        for bytes in samples {
-            let sample = f32::from_le_bytes(*bytes);
-            low = low.min(sample);
-            high = high.max(sample);
-            filled += 1;
-            if filled == slot {
-                peaks.extend([quantize(low), quantize(high)]);
-                (low, high, filled) = (0.0, 0.0, 0);
-            }
-        }
-        carry.drain(..whole);
-    }
-    if filled > 0 {
-        peaks.extend([quantize(low), quantize(high)]);
+        let (whole, _) = carry.as_chunks::<4>();
+        samples.clear();
+        samples.extend(whole.iter().map(|bytes| f32::from_le_bytes(*bytes)));
+        let used = whole.len() * 4;
+        carry.drain(..used);
+        consume(&samples);
     }
     let status = child.wait().await.map_err(DomainError::storage)?;
     if !status.success() {
@@ -367,7 +432,7 @@ async fn decode_peaks(ffmpeg: &Path, source: &Path) -> Result<Vec<i8>> {
             "ffmpeg could not decode the audio".into(),
         ));
     }
-    Ok(peaks)
+    Ok(())
 }
 
 fn quantize(sample: f32) -> i8 {

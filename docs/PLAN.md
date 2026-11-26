@@ -118,8 +118,8 @@ GET  PATCH  DEL  /videos/{id}
 GET              /videos/{id}/media      seek-optimised proxy (the original until it is made), with Range support
 GET              /videos/{id}/thumbnails thumbnail sprite, one tile a second
 GET              /videos/{id}/peaks      waveform peaks
-GET              /videos/{id}/nav        attacks, beat grid
-GET  PUT         /videos/{id}/state      remembered position, speed, loop, zoom
+GET              /videos/{id}/attacks    attacks (note onsets) found in the audio
+GET  PUT         /videos/{id}/state      remembered position, speed, loop, zoom, beat grid
 CRUD             /videos/{id}/markers
 CRUD             /videos/{id}/comments
 POST             /videos/{id}/pipelines  start transcription, score or analysis
@@ -164,7 +164,7 @@ WS               /events                 progress, library changes, MIDI input
 ```
 Library/
 ├─ library.db                         SQLite (WAL mode)
-├─ media/<video_id>/                  original.mp4 · proxy.mp4 · thumbnails.jpg · peaks.json · onsets.json
+├─ media/<video_id>/                  original.mp4 · proxy.mp4 · thumbnails.jpg · peaks.json · attacks.json
 └─ artifacts/<video_id>/<artifact>/   notes.json · score.musicxml · harmony.json · …
 ```
 
@@ -273,14 +273,14 @@ Every seek decodes again from the keyframe before its target, even one frame for
 
 The same gestures work at every scale:
 
-| Unit                  | From     | Source                                                                    |
-| --------------------- | -------- | ------------------------------------------------------------------------- |
-| Frame                 | Phase 1A | Video                                                                     |
-| Attack (note onset)   | Phase 1A | Onset detection on the audio, in the core; transcribed notes from Phase 2 |
-| Beat and bar          | Phase 1A | Tap-tempo grid; automatic beat and bar tracking from Phase 2              |
-| Step of N seconds     | Phase 1A | Configurable (2 s by default)                                             |
-| Marker, section, loop | Phase 1A | The user and YouTube chapters; suggested sections from Phase 2            |
-| Chord change          | Phase 4  | Harmonic analysis                                                         |
+| Unit                  | From       | Source                                                                    |
+| --------------------- | ---------- | ------------------------------------------------------------------------- |
+| Frame                 | Phase 1A   | Video                                                                     |
+| Attack (note onset)   | Phase 1A ✔ | Onset detection on the audio, in the core; transcribed notes from Phase 2 |
+| Beat and bar          | Phase 1A   | Tap-tempo grid; automatic beat and bar tracking from Phase 2              |
+| Step of N seconds     | Phase 1A   | Configurable (2 s by default)                                             |
+| Marker, section, loop | Phase 1A   | The user and YouTube chapters; suggested sections from Phase 2            |
+| Chord change          | Phase 4    | Harmonic analysis                                                         |
 
 #### Timeline
 
@@ -288,6 +288,14 @@ The same gestures work at every scale:
 - **Hover** shows a frame preview, the time, the bar, the section and any comment at that point.
 - **Click** jumps. **Drag** scrubs with sound (short audio grains, as in video editors). **Shift + drag** creates a loop. Dragging a loop edge adjusts it, **snapping** to beats, attacks and markers (hold `Alt` to disable snapping). **Double-click** adds a marker. **Right-click** opens a context menu.
 - **Ctrl + wheel** (or pinch) zooms; the **wheel** (or a two-finger swipe) pans.
+
+Built on 26 November 2026:
+
+- Both levels are drawn on canvases, outside React, from an animation-frame loop that reads the playhead from the video. The overview shows the waveform, the stretch the detail view shows, and the playhead. The detail view shows a ruler (with frame boundaries once frames are 6 px wide), the waveform and the attacks.
+- The detail view zooms from half a second to the whole song (`Ctrl` + wheel, `Ctrl` `+`/`-`/`0`) and follows playback by page, continuously or not at all. The mode and the zoom are remembered. A manual pan pauses following until the next jump or play, and jumps always bring the playhead into view.
+- Click jumps and drag scrubs, silently for now. Hovering the overview shows that second's thumbnail. Hovering the detail view shows the exact frame, from a second hidden video that only runs the latest seek.
+- With the timeline running, jumps and frame steps on the Monk video stay within the budget (p95 26–47 ms and 26–38 ms).
+- Still to come: sections, markers, loop and comments on the overview, the beat grid, audible scrubbing and snapping.
 
 #### Keyboard
 
@@ -343,7 +351,12 @@ Done in the background after a download or import:
   - The player switches to it as soon as it is ready, keeping the position, speed and play state. Playback uses the proxy; analysis uses the original.
 - **Thumbnail sprite** for hover previews: one JPEG with a 160-pixel-wide tile per second, taken from the proxy's keyframes in about half a second. When zoomed in, a hidden second video element shows the exact frame under the cursor.
 - **Waveform peaks**: the minimum and maximum of every 10 ms of mono audio, with coarser levels derived in the UI.
-- Planned: **decoded audio** for audible scrubbing, and **attack detection** in Rust (spectral flux with rustfft) for stepping and snapping from day one.
+- **Attacks** (note onsets), for stepping and snapping, found in Rust on the audio decoded at 24 kHz (`crates/media/src/onsets.rs`). The method is the logarithmic filtered spectral flux, with SuperFlux's peak picking and attacks at least 50 ms apart. About 0.4 s for the 2:21 Monk video.
+  - Measured against the notes lit on that video's Synthesia keyboard (`eval/attacks/evaluate.py`): precision 0.98, recall 0.92, F 0.95 within 50 ms, median timing error 3 ms.
+  - SuperFlux as published scored F 0.83, with recall 0.71. Its maximum filter, meant to ignore vibrato, hid melodies moving by semitones, and its 30 ms gap counted some chords twice.
+  - The same evaluation showed that this video's sound runs 57 ms behind its picture.
+- Planned: **decoded audio** for audible scrubbing.
+- The audio parts come first, since they take a second or two: the waveform and the attacks reach the timeline almost at once, before the seek proxy.
 - Preparation runs one video at a time, reports its progress in the library and the player, and resumes after a restart. A failure is shown on the video, which still plays from the original.
 
 #### Playback engine
@@ -489,6 +502,7 @@ Monorepo tooling: pnpm workspaces (plus Turborepo once there are enough packages
 
 - **Tests:** Rust with cargo-nextest (unit tests, and integration tests on a temporary SQLite); Python with pytest; UI with Vitest and Testing Library; Playwright for the UI in a browser and WebDriver (tauri-driver) for the packaged app.
 - **Navigation performance:** the diagnostics overlay records jump, frame-step and shortcut latencies; a scripted benchmark on reference videos checks the budget before each release.
+- **Attack evaluation:** `eval/attacks/evaluate.py` reads the note starts off a Synthesia keyboard (the keys that light up) and scores the attacks found in the audio against them. It is the first use of the Synthesia picture as reference data.
 - **Transcription evaluation:** videos with reference MIDI and standard metrics computed with mir_eval: note F1 by onset, note F1 by onset and offset, and hand accuracy. Part of the set is **generated synthetically** by rendering known MIDI files as Synthesia-style videos in varied styles (colours, speeds, effects, partial keyboards), which gives perfect reference data in unlimited quantity. Metrics are compared on every change to catch regressions.
 - **Harmony evaluation:** corpora annotated with Roman numerals (e.g. When in Rome) and pop arrangements with annotated chords (e.g. POP909), checking their licences first and using them for internal evaluation only.
 - **CI (GitHub Actions):** formatting and linting (rustfmt, clippy, ruff, Biome), type checks (tsc, pyright), tests, a check that code generated from the contracts is up to date, a **licence audit** (cargo-deny, pip-licenses, pnpm licenses) and a Windows installer for each release.
@@ -507,8 +521,13 @@ Each phase ends with something usable and a verifiable exit criterion.
 
 **Phase 1A: Base app (features 1–4), navigation first**
 
-1. Local file import and media preparation: seek proxy, thumbnails, waveform peaks and attacks. _(Done except attacks, which come with the timeline. Import: ffprobe, hard link or copy into the library, media served with Range requests. Preparation runs in the background with progress and makes the seek proxy, the thumbnail sprite and the waveform peaks. Jumps and frame steps are within the budget; see 4.2.)_
-2. The player with the full navigation layer: two-level timeline, shortcuts, frame and attack stepping, tap-tempo grid, go-to, navigation history, return to start, replay and speed. _(First version done: play/pause, ±2 s, ±10 s, frame steps, start/end, speed, replay, and the switch to the proxy once it is ready. Next: the two-level timeline with the waveform and hover thumbnails.)_
+1. Local file import and media preparation: seek proxy, thumbnails, waveform peaks and attacks. _(Done. Import: ffprobe, hard link or copy into the library, media served with Range requests. Preparation runs in the background with progress: waveform peaks, attacks, seek proxy, thumbnail sprite. Jumps and frame steps are within the budget; see 4.2.)_
+2. The player with the full navigation layer: two-level timeline, shortcuts, frame and attack stepping, tap-tempo grid, go-to, navigation history, return to start, replay and speed. _(Done:_
+   - _play/pause, ±2 s, ±10 s, frame and attack stepping, start/end, speed and replay;_
+   - _the switch to the proxy once it is ready;_
+   - _the two-level timeline with waveform, ruler, attacks, zoom, follow modes and hover previews (see Timeline in 4.2)._
+
+   _Next: tap-tempo grid, go-to, navigation history and return to start.)_
 3. Markers, sections, A-B loops, pre-roll, count-in and speed trainer.
 4. Comments anchored to time.
 5. YouTube downloads, chapters as markers, and the library (search, tags, remembered state).
@@ -598,6 +617,8 @@ Without an NVIDIA GPU, everything is designed to run well on the CPU, with optio
 | Local backend                  | Rust core + Python engine                                                      | Everything in Python (FastAPI)         | Instant start-up, features 1–4 without Python, engine on demand, scalable workers                  |
 | UI ↔ core                      | HTTP + WebSocket on localhost with a token                                     | Tauri IPC (commands)                   | The same API will serve the web version; the local port is protected with a token and a Host check |
 | Playback media                 | Seek-optimised proxy (keyframe ≤ 15 frames apart, GPU encoder or OpenH264)     | Playing the downloaded file directly   | Jumps and frame steps about 10× faster (measured, 4.2); keeps ffmpeg within the LGPL               |
+| Attack detection               | Log filtered spectral flux, attacks ≥ 50 ms apart                              | SuperFlux as published                 | F 0.95 against 0.83 on real piano (measured, 4.2): a piano has no vibrato to filter out            |
+| Timeline drawing               | Canvas drawn outside React, every animation frame                              | SVG or DOM elements per tick           | 60 fps while playing and zooming, with thousands of attacks                                        |
 | Playback engine                | Native `<video>` first; Web Audio + time-stretching if measurements require it | Web Audio from day one                 | Start simple, upgrade on evidence                                                                  |
 | Beat grid before transcription | Tap tempo                                                                      | Wait until Phase 2                     | Musical navigation from the first version                                                          |
 | Transcription                  | Hybrid vision + audio                                                          | Vision only; audio only                | Precision and hands from vision, plus dynamics, pedal and fallback from audio                      |

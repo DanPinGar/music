@@ -101,7 +101,7 @@ pub struct PreparationInput {
 /// method writes its target atomically: a reader never sees a half-written file.
 #[async_trait]
 pub trait MediaPreparer: Send + Sync {
-    /// Re-encodes `source` so that any frame decodes fast: a keyframe every ~0.5 s and no
+    /// Re-encodes `source` so that any frame decodes fast: frequent keyframes and no
     /// B-frames. Reports progress from 0.0 to 1.0.
     async fn make_seek_proxy(
         &self,
@@ -121,6 +121,9 @@ pub trait MediaPreparer: Send + Sync {
 
     /// Writes the audio waveform peaks of `source` as JSON.
     async fn make_peaks(&self, source: &Path, target: &Path) -> Result<()>;
+
+    /// Finds the attacks (note onsets) in the audio of `source` and writes them as JSON.
+    async fn make_attacks(&self, source: &Path, target: &Path) -> Result<()>;
 }
 
 #[cfg(test)]
