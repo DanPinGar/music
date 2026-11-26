@@ -23,17 +23,17 @@ clap = { version = "4", features = ["derive", "env"] }
 realfft = "3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sqlx = { version = "0.8", default-features = false, features = ["chrono", "macros", "migrate", "runtime-tokio", "sqlite"] }
+sqlx = { version = "0.9", default-features = false, features = ["chrono", "macros", "migrate", "runtime-tokio", "sqlite"] }
 subtle = "2"
 tempfile = "3"
 thiserror = "2"
 tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync"] }
 tower = { version = "0.5", features = ["util"] }
-tower-http = { version = "0.6", features = ["cors", "fs", "trace"] }
+tower-http = { version = "0.7", features = ["cors", "fs", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-utoipa = { version = "5", features = ["chrono", "uuid"] }
-utoipa-axum = "0.2"
+utoipa = { version = "6", features = ["chrono", "uuid"] }
+utoipa-axum = "0.3"
 uuid = { version = "1", features = ["serde", "v4", "v7"] }
 
 [workspace.lints.rust]
