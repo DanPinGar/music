@@ -223,14 +223,14 @@ Configuration and adapters change (PostgreSQL repositories, S3 storage, external
   - while developing, the tools in the repository's `.tools/` (filled by `pnpm tools`, the same installer) are used and left alone; `SEGNO_TOOLS_DIR` points the app at a throwaway folder to try the installation;
   - ffmpeg has LGPL builds for Windows only: elsewhere the system's ffmpeg is used.
 - Preferred format: H.264/AAC in MP4 up to 1080p, **favouring 60 fps** when available: it doubles the time resolution of vision transcription.
-- A download first reads the video's details (title, channel, duration, chapters), which the card shows at once, then downloads. yt-dlp loads the details it already read instead of extracting them again: YouTube's JavaScript challenges are solved once, and the Monk video downloads in about 7 s instead of 16 s.
+- A download first reads the video's details (title, channel, duration, chapters), which the library shows at once, then downloads. yt-dlp loads the details it already read instead of extracting them again: YouTube's JavaScript challenges are solved once, and the Monk video downloads in about 7 s instead of 16 s.
 - Metadata and thumbnail are stored, and **YouTube chapters become initial sections** (only on a video without markers, so a retry never repeats them).
 - A link already in the library is not downloaded twice. Links are pasted into the `Ctrl+D` dialog, or anywhere in the library.
 - Drag-and-drop import of local files (MP4, MKV, WebM, MOV) and also **MIDI or MusicXML**, to attach exact notes to a video without transcribing.
 - After a download or import, the video is **prepared for navigation** in the background ([§4.2](#media-prepared-for-instant-seeking)); it can be played straight away while that runs.
 - Background queue with progress by stage (waiting, reading the details, downloading, finishing), cancellation (deleting a video stops its download and removes its files) and retries. Downloads interrupted by closing the app start again on the next launch. The app reminds users that they are responsible for how they use downloads.
-- Each video names the song it plays: title, artist and the year the song or its album was published, shown as "song · artist · year". They are guessed from the video's title ("Artist - Song 1936 (Piano Tutorial)", "Song - Genre // ARTIST"), or taken from YouTube's music details when it has them; the upload date is never taken for the year. Libraries made before this get them guessed once, at the next start. The card's menu edits all three.
-- The library searches songs, artists, years, channels and tags (ignoring case and accents), filters by tag, and sorts by year published (oldest first, songs without a year last; the default), date added, last studied or title. Each card shows how far the video was studied (a bar on the thumbnail and "continue at"), and its menu edits the song's details and tags, or deletes the video.
+- Each video names the song it plays: title, artist and the year the song or its album was published, shown as "song · artist · year". The title and artist are guessed from the video's title ("Artist - Song 1936 (Piano Tutorial)", "Song - Genre // ARTIST"), or taken from YouTube's music details when it has them; libraries made before this get them guessed once, at the next start. The year is only ever the user's: a year in the video's title is left out of the song's name, and neither YouTube's dates nor any lookup fill it in. The row's menu edits all three.
+- The library searches songs, artists, years, channels and tags (ignoring case and accents), filters by tag, and sorts by year published (oldest first, songs without a year last; the default), date added, last studied or title. It lists the videos one under another: each row has the name on one line ("…" when too long, whole on hover), the duration and how a download or preparation goes under it, and a small picture at the end; its menu edits the song's details and tags, or deletes the video.
 
 ### 4.2 Song navigation (top priority)
 
@@ -597,7 +597,7 @@ Each phase ends with something usable and a verifiable exit criterion.
 5. YouTube downloads, chapters as markers, and the library (search, tags, remembered state). _(Done:_
    - _downloads with yt-dlp and Deno in a background queue, with progress by stage, retries, and cancellation by deleting;_
    - _chapters as sections;_
-   - _search, tag filter, sorting, renaming, tags, deletion, and how far each video was studied;_
+   - _search, tag filter, sorting, renaming, tags and deletion, in a list of one row per video;_
    - _ffmpeg, yt-dlp and Deno installed and kept up to date by the app itself._
 
    _See 4.1.)_

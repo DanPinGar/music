@@ -53,23 +53,24 @@ pub async fn import_local_video(
     Ok(video)
 }
 
-/// Guesses the song's artist and year from the title of the videos that have neither, once
-/// for libraries made before videos had them. Returns how many videos it filled in.
+/// Guesses the song from the title of the videos given neither an artist nor a year, as new
+/// ones get it, once for libraries made before videos had them: the artist, and the title
+/// without what only describes the video. Returns how many videos it changed.
 pub async fn guess_missing_songs(videos: &dyn VideoRepository) -> Result<usize> {
-    let mut filled = 0;
+    let mut changed = 0;
     for mut video in videos.list().await? {
         if video.artist.is_some() || video.year.is_some() {
             continue;
         }
         let song = guess_song(&video.title);
-        if song.artist.is_none() && song.year.is_none() {
+        if song.artist.is_none() && song.title == video.title {
             continue;
         }
         video.apply_song(song);
         videos.update(&video).await?;
-        filled += 1;
+        changed += 1;
     }
-    Ok(filled)
+    Ok(changed)
 }
 
 /// The steps of preparing a video for navigation, in the order they run.
@@ -225,16 +226,23 @@ mod tests {
         old.status = VideoStatus::Ready;
         let mut edited = Video::new_importing(VideoSource::File, "Nocturne - Live", None).unwrap();
         edited.year = Some(1830);
+        let untitled =
+            Video::new_importing(VideoSource::File, "Clair de Lune 1905 (Piano)", None).unwrap();
         let plain = Video::new_importing(VideoSource::File, "clip", None).unwrap();
-        for video in [&old, &edited, &plain] {
+        for video in [&old, &edited, &untitled, &plain] {
             videos.insert(video).await.unwrap();
         }
 
-        assert_eq!(guess_missing_songs(&videos).await.unwrap(), 1);
+        assert_eq!(guess_missing_songs(&videos).await.unwrap(), 2);
         let old = videos.get(old.id).await.unwrap();
+        // The year is left to the user.
         assert_eq!(
             (old.title.as_str(), old.artist.as_deref(), old.year),
-            ("Dinah", Some("Thelonious Monk"), Some(1965))
+            ("Dinah", Some("Thelonious Monk"), None)
+        );
+        assert_eq!(
+            videos.get(untitled.id).await.unwrap().title,
+            "Clair de Lune"
         );
         assert_eq!(
             videos.get(edited.id).await.unwrap().title,

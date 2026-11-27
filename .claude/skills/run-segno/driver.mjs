@@ -989,24 +989,38 @@ async function smoke() {
     await COMMANDS.ss("smoke-6-comments");
     await app.mouse.move(0, 0);
 
-    // The library: how far the clip was studied, renaming and tagging it, searching,
-    // the download dialog refusing other links, and deleting it with its files.
+    // The library: the clip's row, renaming and tagging it, searching, the download dialog
+    // refusing other links, and deleting it with its files.
     await app.keyboard.press("Control+1");
-    const card = "[data-testid=video-card]";
-    const listed = await appears(card);
-    const progressShown = await appears(`${card} [data-testid=study-progress]`, 2_000);
+    const videoRow = "[data-testid=video-row]";
+    const listed = await appears(videoRow);
+    const layout = await app
+      .locator(videoRow)
+      .evaluate((element) => {
+        const name = element.querySelector("[data-testid=video-name]");
+        const box = name.getBoundingClientRect();
+        const picture = element
+          .querySelector("[data-testid=video-thumbnail]")
+          .getBoundingClientRect();
+        return {
+          lines: Math.round(box.height / Number.parseFloat(getComputedStyle(name).lineHeight)),
+          pictureAtEnd: picture.left >= box.right,
+          pictureWidth: Math.round(picture.width),
+          duration: element.querySelector("[data-testid=video-duration]")?.textContent ?? "",
+        };
+      })
+      .catch(() => null);
     check(
-      "the library lists the clip with how far it was studied",
-      listed && progressShown,
-      squash(
-        await app
-          .locator(card)
-          .innerText()
-          .catch(() => ""),
-      ),
+      "the library lists the clip as a row: its name on one line, its duration, a small picture at the end",
+      listed &&
+        layout?.lines === 1 &&
+        layout.pictureAtEnd &&
+        layout.pictureWidth <= 128 &&
+        /^\d+:\d\d$/.test(layout.duration),
+      JSON.stringify(layout),
     );
 
-    await app.click(`${card} [data-testid=video-menu]`).catch(() => {});
+    await app.click(`${videoRow} [data-testid=video-menu]`).catch(() => {});
     await app.click("[data-testid=video-edit]", { timeout: 3_000 }).catch(() => {});
     await app.waitForSelector("[data-testid=edit-title]:focus", { timeout: 3_000 }).catch(() => {});
     await app.keyboard.press("Control+a");
@@ -1017,16 +1031,18 @@ async function smoke() {
       await app.keyboard.type(field, { delay: 10 });
     }
     await app.keyboard.press("Enter");
-    await app.waitForSelector(`${card} >> text=Smoke Quartet`, { timeout: 5_000 }).catch(() => {});
+    await app
+      .waitForSelector(`${videoRow} >> text=Smoke Quartet`, { timeout: 5_000 })
+      .catch(() => {});
     const edited = await fetchVideo(imported.id);
     const name = squash(
       await app
-        .locator(`${card} [data-testid=video-name]`)
+        .locator(`${videoRow} [data-testid=video-name]`)
         .innerText()
         .catch(() => ""),
     );
     check(
-      "the card's menu edits the song (title, artist, year) and tags, shown as song · artist · year",
+      "the row's menu edits the song (title, artist, year) and tags, shown as song · artist · year",
       edited?.title === "Smoke clip" &&
         edited?.artist === "Smoke Quartet" &&
         edited?.year === 1959 &&
@@ -1040,17 +1056,17 @@ async function smoke() {
     const searching = await appears("[data-testid=library-search]:focus", 2_000);
     await app.keyboard.type("zzz", { delay: 10 });
     await sleep(200);
-    const hidden = await app.locator(card).count();
+    const hidden = await app.locator(videoRow).count();
     await app.keyboard.press("Escape");
     await app.keyboard.type("JAZZ smo", { delay: 10 });
     await sleep(200);
-    const found = await app.locator(card).count();
+    const found = await app.locator(videoRow).count();
     await app.keyboard.press("Escape");
     await app.keyboard.press("Escape");
     check(
       '"/" searches the library by title and tags',
       searching && hidden === 0 && found === 1,
-      `"zzz": ${hidden} cards, "JAZZ smo": ${found}`,
+      `"zzz": ${hidden} rows, "JAZZ smo": ${found}`,
     );
 
     await app.keyboard.press("Control+d");
@@ -1061,10 +1077,10 @@ async function smoke() {
     await app.waitForSelector("[data-slot=dialog-content]", { state: "detached" }).catch(() => {});
     check("Ctrl+D asks for a YouTube link and refuses others", dialog && refused);
 
-    await app.click(`${card} [data-testid=video-menu]`).catch(() => {});
+    await app.click(`${videoRow} [data-testid=video-menu]`).catch(() => {});
     await app.click("[data-testid=video-delete]", { timeout: 3_000 }).catch(() => {});
     await app.click("[data-testid=delete-confirm]", { timeout: 3_000 }).catch(() => {});
-    await app.waitForSelector(card, { state: "detached", timeout: 5_000 }).catch(() => {});
+    await app.waitForSelector(videoRow, { state: "detached", timeout: 5_000 }).catch(() => {});
     const system = await apiJson("/system");
     const folder = path.join(system.library_path, "media", imported.id);
     const left = await apiJson("/videos");

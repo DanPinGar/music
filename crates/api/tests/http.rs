@@ -109,7 +109,6 @@ impl VideoDownloader for FakeDownloader {
             channel: Some("itsRemco".into()),
             track: None,
             artist: None,
-            release_year: None,
             duration_ms: Some(141_000),
             chapters: vec![
                 Chapter {

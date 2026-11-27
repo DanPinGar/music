@@ -15,10 +15,9 @@ use crate::{
 pub struct RemoteVideo {
     pub title: String,
     pub channel: Option<String>,
-    /// The song's title, artist and year, when YouTube knows them (music it identified).
+    /// The song's title and artist, when YouTube knows them (music it identified).
     pub track: Option<String>,
     pub artist: Option<String>,
-    pub release_year: Option<i32>,
     pub duration_ms: Option<i64>,
     pub chapters: Vec<Chapter>,
 }
@@ -189,19 +188,14 @@ async fn fetch_and_download(
 }
 
 /// The song in a YouTube video: what YouTube says about the music when it knows, guessed from
-/// the video's title otherwise. The upload date is not the song's year, so it is never used.
+/// the video's title otherwise. Never its year, which only the user gives.
 pub fn song_of(info: &RemoteVideo) -> SongDetails {
-    let guess = guess_song(&info.title);
     match (&info.track, &info.artist) {
         (Some(track), Some(artist)) => SongDetails {
             title: track.clone(),
             artist: Some(artist.clone()),
-            year: info.release_year.or(guess.year),
         },
-        _ => SongDetails {
-            year: guess.year.or(info.release_year),
-            ..guess
-        },
+        _ => guess_song(&info.title),
     }
 }
 
@@ -278,7 +272,6 @@ mod tests {
                 channel: Some("itsRemco".into()),
                 track: None,
                 artist: None,
-                release_year: None,
                 duration_ms: Some(141_000),
                 chapters: vec![
                     Chapter {
@@ -351,7 +344,6 @@ mod tests {
             channel: None,
             track: Some("Take Five".into()),
             artist: Some("The Dave Brubeck Quartet".into()),
-            release_year: None,
             duration_ms: None,
             chapters: Vec::new(),
         };
@@ -360,17 +352,20 @@ mod tests {
             SongDetails {
                 title: "Take Five".into(),
                 artist: Some("The Dave Brubeck Quartet".into()),
-                year: Some(1959),
             }
         );
         let unknown = RemoteVideo {
             track: None,
             artist: None,
-            release_year: Some(1961),
             ..info
         };
-        assert_eq!(song_of(&unknown).year, Some(1959), "the title's year wins");
-        assert_eq!(song_of(&unknown).artist.as_deref(), Some("Dave Brubeck"));
+        assert_eq!(
+            song_of(&unknown),
+            SongDetails {
+                title: "Take Five".into(),
+                artist: Some("Dave Brubeck".into()),
+            }
+        );
     }
 
     #[tokio::test]
@@ -405,9 +400,10 @@ mod tests {
         .unwrap();
 
         assert_eq!(ready.status, VideoStatus::Ready);
+        // The year in the title is left to the user.
         assert_eq!(
             (ready.title.as_str(), ready.artist.as_deref(), ready.year),
-            ("I'm Confessin'", Some("Thelonious Monk"), Some(1930))
+            ("I'm Confessin'", Some("Thelonious Monk"), None)
         );
         assert_eq!(ready.channel.as_deref(), Some("itsRemco"));
         assert_eq!(ready.fps, Some(60.0));

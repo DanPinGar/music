@@ -48,12 +48,12 @@ pub async fn local_state(library_dir: &Path, tools: ToolsSetup) -> anyhow::Resul
     let mut roots = tools.roots.clone();
     roots.extend(tools.managed.clone());
 
-    // Libraries made before videos had an artist and a year get them guessed, once.
+    // Libraries made before videos had an artist get it guessed, once; the year is the user's.
     if store.pending("guess_songs").await? {
-        let filled = segno_domain::library::guess_missing_songs(&store).await?;
+        let changed = segno_domain::library::guess_missing_songs(&store).await?;
         tracing::info!(
-            filled,
-            "guessed the artist and year of the videos in the library"
+            changed,
+            "guessed the songs of the videos in the library from their titles"
         );
         store.done("guess_songs").await?;
     }

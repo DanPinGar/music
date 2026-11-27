@@ -35,7 +35,7 @@ import {
 } from "./library-filters";
 import { useImportVideos } from "./use-import-videos";
 import { useLibraryActions } from "./use-library-actions";
-import { VideoCard } from "./video-card";
+import { VideoRow } from "./video-row";
 
 const ORDER_KEY = "segno.library.order";
 
@@ -117,7 +117,7 @@ export function LibraryPage() {
   };
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-6 p-6">
+    <div className="mx-auto flex max-w-4xl flex-col gap-6 p-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="font-heading text-2xl font-semibold">{t("library.title")}</h1>
@@ -193,7 +193,7 @@ export function LibraryPage() {
             {tags.length > 0 && <TagFilter tags={tags} active={tag} onChange={setTag} />}
           </div>
           {shown.length > 0 ? (
-            <VideoGrid videos={shown} activeTag={tag} onTag={setTag} />
+            <VideoList videos={shown} />
           ) : (
             <div className="flex flex-col items-center gap-3 py-12 text-sm text-muted-foreground">
               {t("library.noMatches")}
@@ -294,20 +294,13 @@ function TagFilter({
   );
 }
 
-function VideoGrid({
-  videos,
-  activeTag,
-  onTag,
-}: {
-  videos: Video[];
-  activeTag: string | null;
-  onTag: (tag: string | null) => void;
-}) {
+/** The videos one under another, in the order chosen. */
+function VideoList({ videos }: { videos: Video[] }) {
   return (
-    <ul className="grid grid-cols-[repeat(auto-fill,minmax(16rem,1fr))] gap-4">
+    <ul className="flex flex-col divide-y overflow-hidden rounded-xl bg-card ring-1 ring-foreground/10">
       {videos.map((video) => (
         <li key={video.id}>
-          <VideoCard video={video} activeTag={activeTag} onTag={onTag} />
+          <VideoRow video={video} />
         </li>
       ))}
     </ul>

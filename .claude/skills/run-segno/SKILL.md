@@ -68,8 +68,8 @@ It prints `PASS`/`FAIL` for 44 checks:
   free), a double-click adds a marker, and return-on-pause goes back to where playback started;
 - comments: `C` writes one in Markdown at the playhead, `Ctrl+Enter` saves it and gives the keys
   back, a time written in it jumps there, and the hover preview shows it;
-- the library, back from the player: the card shows how far the clip was studied, its `···`
-  menu edits its song (title, artist, year, shown as "song · artist · year") and tags, `/` searches by title and tags, `Ctrl+D` opens the download dialog
+- the library, back from the player: the clip is a row (name on one line, duration, small
+  picture at the end), its `···` menu edits its song (title, artist, year, shown as "song · artist · year") and tags, `/` searches by title and tags, `Ctrl+D` opens the download dialog
   and refuses a link that is not YouTube's, and deleting the clip removes it and its files;
 - the tools dialog, opened from the palette, lists ffmpeg, yt-dlp and Deno, and the core
   reports them as external (it leaves the repository's `.tools` alone and installs nothing);
@@ -138,14 +138,14 @@ printf 'launch\napi\nimport test-clip\nwait video\nsleep 1500\npress Space\nslee
 
 Running `node .claude/skills/run-segno/driver.mjs` in a terminal gives a `segno>` prompt for
 the same commands. To try a real YouTube download (it needs the network and `pnpm tools`),
-open the dialog, paste the link and follow the card; this one takes about 15 s plus 30 s of
+open the dialog, paste the link and follow its row; this one takes about 15 s plus 30 s of
 preparation:
 
 ```bash
-printf 'launch\npress Control+d\nwait [data-testid=download-url]\ntype https://youtu.be/7A12z9S4F8U\nclick [data-testid=download-start]\nsleep 5000\ntext [data-testid=video-card]\nsleep 15000\ntext [data-testid=video-card]\nss downloaded\nquit\n' | node .claude/skills/run-segno/driver.mjs
+printf 'launch\npress Control+d\nwait [data-testid=download-url]\ntype https://youtu.be/7A12z9S4F8U\nclick [data-testid=download-start]\nsleep 5000\ntext [data-testid=video-row]\nsleep 15000\ntext [data-testid=video-row]\nss downloaded\nquit\n' | node .claude/skills/run-segno/driver.mjs
 ```
 
-Library cards are `[data-testid=video-card]` (with `data-video-id`); their menu is
+Library rows are `[data-testid=video-row]` (with `data-video-id`); their menu is
 `[data-testid=video-menu]`, with `[data-testid=video-edit]` and `[data-testid=video-delete]`
 (confirmed by `[data-testid=delete-confirm]`). The search box is `[data-testid=library-search]`
 and the download dialog has `[data-testid=download-url]` and `[data-testid=download-start]`.

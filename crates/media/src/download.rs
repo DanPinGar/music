@@ -355,16 +355,11 @@ fn parse_info(json: &Value) -> Result<RemoteVideo> {
                 .join(", ")
         })
         .filter(|artists| !artists.is_empty());
-    let release_year = json
-        .get("release_year")
-        .and_then(Value::as_i64)
-        .and_then(|year| i32::try_from(year).ok());
     Ok(RemoteVideo {
         title,
         channel: text("channel").or_else(|| text("uploader")),
         track: text("track"),
         artist: artists.or_else(|| text("artist")),
-        release_year,
         duration_ms,
         chapters,
     })
@@ -432,10 +427,7 @@ mod tests {
         let info = parse_info(&json).unwrap();
         assert!(info.chapters.is_empty());
         assert_eq!(info.channel.as_deref(), Some("itsRemco"));
-        assert_eq!(
-            (info.track, info.artist, info.release_year),
-            (None, None, None)
-        );
+        assert_eq!((info.track, info.artist), (None, None));
     }
 
     #[test]
@@ -443,8 +435,7 @@ mod tests {
         let json = serde_json::json!({
             "title": "Take Five",
             "track": "Take Five",
-            "artists": ["The Dave Brubeck Quartet", "Paul Desmond"],
-            "release_year": 1959
+            "artists": ["The Dave Brubeck Quartet", "Paul Desmond"]
         });
         let info = parse_info(&json).unwrap();
         assert_eq!(info.track.as_deref(), Some("Take Five"));
@@ -452,7 +443,6 @@ mod tests {
             info.artist.as_deref(),
             Some("The Dave Brubeck Quartet, Paul Desmond")
         );
-        assert_eq!(info.release_year, Some(1959));
         let older = serde_json::json!({ "title": "x", "artist": "Monk", "track": " " });
         let info = parse_info(&older).unwrap();
         assert_eq!((info.track, info.artist.as_deref()), (None, Some("Monk")));

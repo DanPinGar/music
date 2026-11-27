@@ -6,7 +6,6 @@ import {
   parseTags,
   parseYear,
   sortVideos,
-  studyProgress,
   videoName,
   youtubeId,
 } from "./library-filters";
@@ -151,12 +150,5 @@ describe("tags", () => {
 
   it("are typed separated by commas", () => {
     expect(parseTags(" Jazz, To learn ,, ")).toEqual(["Jazz", "To learn"]);
-  });
-});
-
-describe("studyProgress", () => {
-  it("is how far the user got", () => {
-    expect(studyProgress(MONK)).toBe(0.5);
-    expect(studyProgress(CHOPIN)).toBeNull();
   });
 });

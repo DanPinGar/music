@@ -98,12 +98,6 @@ export function allTags(videos: readonly Video[]): string[] {
   return [...tags.values()].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
 }
 
-/** How far into the video the user got, from 0 to 1, or `null` if never opened. */
-export function studyProgress(video: Video): number | null {
-  if (video.position_ms == null || !video.duration_ms) return null;
-  return Math.min(1, Math.max(0, video.position_ms / video.duration_ms));
-}
-
 /** Tags typed as "Jazz, To learn ,": split on commas, trimmed, without empty ones. */
 export function parseTags(text: string): string[] {
   return text

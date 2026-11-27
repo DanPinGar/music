@@ -262,7 +262,8 @@ impl Video {
         Ok(())
     }
 
-    /// Takes the song's title, artist and year from `song` (an empty title is not taken).
+    /// Takes the song's title and artist from `song` (an empty title is not taken). The year
+    /// stays as it is: only the user gives it.
     pub fn apply_song(&mut self, song: SongDetails) {
         let title = song.title.trim();
         if !title.is_empty() {
@@ -278,7 +279,6 @@ impl Video {
                     .collect::<String>()
             })
             .filter(|artist| !artist.is_empty());
-        self.year = song.year.filter(|year| YEARS.contains(year));
         self.updated_at = Utc::now();
     }
 

@@ -50,7 +50,6 @@
     "noMatches": "No video matches the search.",
     "clearFilters": "Clear filters",
     "count": "{{shown}} of {{total}} videos",
-    "resume": "Continue at {{time}}",
     "actions": "More actions",
     "edit": "Edit…",
     "editTitle": "Edit the video",
